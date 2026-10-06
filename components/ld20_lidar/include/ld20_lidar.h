@@ -46,6 +46,11 @@ typedef struct {
 } ld20_scan_t;
 
 typedef struct {
+    uint32_t rx_bytes;
+    uint32_t headers;
+    uint32_t rejected_packets;
+    uint8_t sample[16];
+    uint8_t sample_len;
     uint32_t packets;
     uint32_t crc_errors;
     uint32_t scans;

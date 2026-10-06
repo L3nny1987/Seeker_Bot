@@ -32,9 +32,13 @@ static void packet(const uint8_t *p)
 {
     unsigned start = le16(p + 4), end = le16(p + 42);
     unsigned speed = le16(p + 2); /* degrees/second, NOT RPM */
-    if (start >= 36000 || end >= 36000 || speed < 360 || speed > 7200) return;
     unsigned span = (end + 36000 - start) % 36000;
-    if (span > 4500) return;
+    if (start >= 36000 || end >= 36000 || speed < 360 || speed > 7200 || span > 4500) {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        s_stats.rejected_packets++;
+        xSemaphoreGive(s_lock);
+        return;
+    }
     int64_t now = esp_timer_get_time();
     xSemaphoreTake(s_lock, portMAX_DELAY);
     if (s_last_packet && now - s_last_packet > SEEKER_LIDAR_STALE_MS * 1000LL) {
@@ -79,12 +83,24 @@ static void receive_task(void *arg)
     unsigned used = 0;
     while (true) {
         int n = uart_read_bytes(SEEKER_LIDAR_UART_NUM, bytes, sizeof(bytes), pdMS_TO_TICKS(20));
+        if (n > 0) {
+            xSemaphoreTake(s_lock, portMAX_DELAY);
+            s_stats.rx_bytes += n;
+            s_stats.sample_len = n < (int)sizeof(s_stats.sample) ? n : sizeof(s_stats.sample);
+            memcpy(s_stats.sample, bytes, s_stats.sample_len);
+            xSemaphoreGive(s_lock);
+        }
         for (int i = 0; i < n; i++) {
             if (!used && bytes[i] != 0x54) continue;
             frame[used++] = bytes[i];
             if (used == 2 && frame[1] != 0x2c) {
                 used = frame[1] == 0x54 ? 1 : 0;
                 continue;
+            }
+            if (used == 2) {
+                xSemaphoreTake(s_lock, portMAX_DELAY);
+                s_stats.headers++;
+                xSemaphoreGive(s_lock);
             }
             if (used != sizeof(frame)) continue;
             if (crc8(frame, 46) == frame[46]) { packet(frame); used = 0; }

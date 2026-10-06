@@ -2,7 +2,7 @@
  * @file    track_drive.c
  * @brief   Implementierung des Kettenantriebs (L298N).
  *
- * STATUS: Geruest - noch keine Logik implementiert.
+ * Serialized control of independent drive and turn axes.
  */
 
 #include "track_drive.h"
@@ -22,6 +22,8 @@ static esp_err_t axis(ledc_channel_t channel, gpio_num_t a, gpio_num_t b,
                       int value, int previous, bool inverted)
 {
     if (inverted) { value = -value; previous = -previous; }
+    /* Avoid cutting the PWM output every manager cycle at constant duty. */
+    if (value == previous) return ESP_OK;
     esp_err_t err = ledc_set_duty(SEEKER_PWM_MODE, channel, 0);
     if (err == ESP_OK) err = ledc_update_duty(SEEKER_PWM_MODE, channel);
     if (err != ESP_OK) return err;
@@ -73,6 +75,11 @@ esp_err_t track_drive_init(void)
     gpio_set_level(SEEKER_PIN_DRIVE_IN2, 0);
     gpio_set_level(SEEKER_PIN_TURN_IN3, 0);
     gpio_set_level(SEEKER_PIN_TURN_IN4, 0);
+     /* gpio_config reserved these as GPIO outputs. Hand their output paths
+         back before LEDC reserves them (ESP-IDF 6 GPIO ownership tracking). */
+     err = gpio_reset_pin(SEEKER_PIN_DRIVE_EN);
+     if (err == ESP_OK) err = gpio_reset_pin(SEEKER_PIN_TURN_EN);
+     if (err != ESP_OK) return err;
     ledc_timer_config_t timer = { .speed_mode = SEEKER_PWM_MODE,
         .timer_num = SEEKER_PWM_TIMER, .duty_resolution = SEEKER_PWM_RESOLUTION,
         .freq_hz = SEEKER_PWM_FREQ_HZ, .clk_cfg = LEDC_AUTO_CLK };

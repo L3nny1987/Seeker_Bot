@@ -1,0 +1,10 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const zlib = require('node:zlib');
+const header = fs.readFileSync('.pio/build/seeker_bot/esp-idf/src/generated/dashboard_asset.h', 'utf8');
+const bytes = Buffer.from([...header.matchAll(/0x([0-9a-f]{2})/g)].map(m => parseInt(m[1], 16)));
+const html = fs.readFileSync('src/web/index.html');
+assert.deepEqual(zlib.gunzipSync(bytes), html);
+assert.ok(bytes.length < html.length / 2, 'Dashboard must compress by at least 50%');
+console.log(`Dashboard asset round-trip valid: ${html.length} -> ${bytes.length} bytes`);

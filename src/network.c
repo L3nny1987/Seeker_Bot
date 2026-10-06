@@ -22,7 +22,8 @@ static void event(void *arg, esp_event_base_t base, int32_t id, void *data)
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         xEventGroupClearBits(s_events, CONNECTED_BIT);
         robot_manager_network(false);
-        ESP_LOGW(TAG, "WLAN getrennt; Antrieb gestoppt");
+        wifi_event_sta_disconnected_t *disconnected = data;
+        ESP_LOGW(TAG, "WLAN getrennt; reason=%u; Antrieb gestoppt", disconnected->reason);
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *ip = data;
         esp_err_t err = seeker_web_start();

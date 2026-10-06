@@ -10,10 +10,21 @@
 #include "esp_http_server.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "dashboard_asset.h"
+#include "lwip/sockets.h"
+#include "lwip/tcp.h"
+#include "esp_wifi.h"
 
-extern const unsigned char page_start[] asm("_binary_index_html_start");
-extern const unsigned char page_end[] asm("_binary_index_html_end");
 static httpd_handle_t s_server;
+
+static esp_err_t socket_open(httpd_handle_t server, int socket)
+{
+    (void)server;
+    /* Small control replies must not wait for Nagle/delayed ACK batching. */
+    int enabled = 1;
+    return setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled)) == 0
+           ? ESP_OK : ESP_FAIL;
+}
 
 static void headers(httpd_req_t *req)
 {
@@ -42,7 +53,17 @@ static esp_err_t index_handler(httpd_req_t *req)
 {
     headers(req);
     httpd_resp_set_type(req, "text/html; charset=utf-8");
-    return httpd_resp_send(req, (const char *)page_start, page_end - page_start - 1);
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    httpd_resp_set_hdr(req, "Vary", "Accept-Encoding");
+    /* The uncompressed CSS/HTML previously exceeded the small TCP send
+       window on a weak Wi-Fi link. Stream a compact asset in bounded chunks. */
+    for (size_t offset = 0; offset < sizeof(dashboard_gzip); offset += 1024) {
+        size_t count = sizeof(dashboard_gzip) - offset;
+        if (count > 1024) count = 1024;
+        esp_err_t err = httpd_resp_send_chunk(req, (const char *)dashboard_gzip + offset, count);
+        if (err != ESP_OK) return err;
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 static esp_err_t status_handler(httpd_req_t *req)
@@ -69,9 +90,26 @@ static esp_err_t status_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(j, "rightMm", s.view.right_mm);
     cJSON_AddNumberToObject(j, "nearestMm", s.view.nearest_mm);
     cJSON_AddNumberToObject(j, "packets", stats.packets);
+    cJSON_AddNumberToObject(j, "lidarRxBytes", stats.rx_bytes);
+    cJSON_AddNumberToObject(j, "lidarHeaders", stats.headers);
+    cJSON_AddNumberToObject(j, "lidarRejected", stats.rejected_packets);
+    cJSON_AddNumberToObject(j, "lidarRxPin", SEEKER_PIN_LIDAR_RX);
+    cJSON_AddNumberToObject(j, "lidarBaud", SEEKER_LIDAR_BAUDRATE);
+    char sample[sizeof(stats.sample) * 2 + 1] = {0};
+    for (unsigned i = 0; i < stats.sample_len; i++)
+        snprintf(sample + i * 2, 3, "%02X", stats.sample[i]);
+    cJSON_AddStringToObject(j, "lidarRawSample", sample);
+    cJSON_AddStringToObject(j, "lidarDiagnostic", !stats.rx_bytes ? "no_uart_bytes" :
+        !stats.headers ? "no_ld_header" : !stats.packets ? "no_valid_packets" :
+        !s.scan_sequence ? "waiting_for_revolution" :
+        !s.lidar_healthy ? "stale_or_incomplete_scan" : "healthy");
     cJSON_AddNumberToObject(j, "crcErrors", stats.crc_errors);
     cJSON_AddNumberToObject(j, "heap", esp_get_free_heap_size());
     cJSON_AddNumberToObject(j, "uptime", esp_timer_get_time() / 1000000);
+    cJSON_AddNumberToObject(j, "resetReason", esp_reset_reason());
+    wifi_ap_record_t ap;
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK)
+        cJSON_AddNumberToObject(j, "wifiRssi", ap.rssi);
     cJSON_AddNumberToObject(j, "manualLimit", SEEKER_MANUAL_MAX_PERCENT);
     return json_reply(req, j);
 }
@@ -180,8 +218,10 @@ esp_err_t seeker_web_start(void)
     config.stack_size = 8192;
     config.max_open_sockets = 4;
     config.lru_purge_enable = true;
+    config.open_fn = socket_open;
     config.recv_wait_timeout = 1;
-    config.send_wait_timeout = 1;
+    /* Network delivery timeout only; motor deadman remains 350 ms. */
+    config.send_wait_timeout = 5;
     esp_err_t err = httpd_start(&s_server, &config);
     if (err != ESP_OK) return err;
     const httpd_uri_t routes[] = {

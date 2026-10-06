@@ -33,7 +33,8 @@
 <div class="reason" id="reason">Warte auf Telemetrie …</div>
 <div class="control-area"><div id="joystick" class="joystick" aria-label="Joystick; alternativ Richtungstasten verwenden"><div id="knob" class="knob"></div></div><div class="dpad" aria-label="Richtungstasten"><button data-drive="1" data-turn="0" aria-label="Vorwärts">↑</button><button data-drive="0" data-turn="-1" aria-label="Links">←</button><button id="center" aria-label="Stopp">■</button><button data-drive="0" data-turn="1" aria-label="Rechts">→</button><button data-drive="-1" data-turn="0" aria-label="Rückwärts">↓</button></div></div>
 <div class="small muted">Gedrückt halten zum Fahren · WASD / Pfeiltasten · Leertaste = Not-Aus</div>
-<div class="axis"><span>Leistungslimit</span><strong><span id="speed-label">30</span> %</strong></div><input id="speed" class="slider" type="range" min="0" max="35" value="30" aria-label="Manuelle Motorleistung">
+<div class="axis"><span>Leistungslimit</span><strong><span id="speed-label">30</span> %</strong></div><input id="speed" class="slider" type="range" min="0" max="100" value="30" aria-label="Manuelle Motorleistung">
+<p class="small muted">Manuell bis 100 % einstellbar. Hohe Leistung nur mit frei aufgebockten Ketten testen. PWM-Prozent ist keine gemessene Geschwindigkeit. Bei etwa 90 % Anlaufschwelle auch Versorgung und Mechanik prüfen. Auto bleibt konservativ begrenzt.</p>
 <div class="axis"><span>Fahrt <strong id="drive">0 %</strong></span><span>Drehung <strong id="turn">0 %</strong></span></div>
 <button id="stop" class="full" disabled>Bewegung stoppen</button><button id="estop" class="danger full emergency">NOT-AUS · ANTRIEB SPERREN</button><button id="reset" class="full" style="margin-top:10px" disabled>Sperre / Fehler zurücksetzen</button>
 <div class="commission"><label><input id="checked" type="checkbox">Ich habe Motorrichtungen, LIDAR-Nullwinkel und Abstände für diesen Roboter geprüft. Auto benötigt durchgehende LIDAR-Daten; überwachte Testfahrt, maximal 60 Sekunden.</label><button id="commission" class="full" disabled>Inbetriebnahme für diesen Start bestätigen</button></div>
@@ -45,9 +46,10 @@
 'use strict';
 const $=id=>document.getElementById(id);
 let token=0,sequence=0,state=null,online=false,axes={drive:0,turn:0},queue=Promise.resolve(),pumpBusy=false,scanData=null,lastReason='',pointer=null;
+let statusFailures=0,lastScanPoll=0,lastUptime=0;
 const keys=new Set();
 function log(text){const li=document.createElement('li');li.textContent=new Date().toLocaleTimeString('de-DE')+' · '+text;$('log').prepend(li);while($('log').children.length>6)$('log').lastChild.remove();}
-async function request(path,body){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),850);try{const response=await fetch(path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json','X-Seeker-Control':'1'}:{},body:body?JSON.stringify(body):undefined,cache:'no-store',signal:controller.signal});if(!response.ok)throw new Error(response.status===409?'Steuerung belegt oder Befehl im aktuellen Zustand gesperrt.':'Anfrage fehlgeschlagen ('+response.status+')');return await response.json();}finally{clearTimeout(timer);}}
+async function request(path,body){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),body?850:2000);try{const response=await fetch(path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json','X-Seeker-Control':'1'}:{},body:body?JSON.stringify(body):undefined,cache:'no-store',signal:controller.signal});if(!response.ok)throw new Error(response.status===409?'Steuerung belegt oder Befehl im aktuellen Zustand gesperrt.':'Anfrage fehlgeschlagen ('+response.status+')');return await response.json();}finally{clearTimeout(timer);}}
 function command(command,extra={}){const body={command,token,sequence:++sequence,...extra};const result=queue.then(()=>request('/api/control',body));queue=result.catch(()=>{});return result;}
 function action(commandName,extra={}){return command(commandName,extra).catch(e=>{log(e.message);});}
 function canDrive(){return online&&token&&state?.mode==='manual';}
@@ -77,10 +79,48 @@ document.addEventListener('keyup',e=>{if(keys.delete(e.key.toLowerCase())){keybo
 window.addEventListener('blur',releaseMotion);
 document.addEventListener('visibilitychange',()=>{if(document.hidden){zero();if(token)action('stop');}});
 window.addEventListener('pagehide',()=>{zero();if(token)fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json','X-Seeker-Control':'1'},body:JSON.stringify({command:'release',token,sequence:++sequence}),keepalive:true}).catch(()=>{});});
-async function pump(){if(token&&!document.hidden&&!pumpBusy){pumpBusy=true;try{const moving=canDrive()&&(axes.drive||axes.turn);if(moving){const limit=Number($('speed').value);await command('move',{drive:Math.round(axes.drive*limit),turn:Math.round(axes.turn*limit)});}else await command('heartbeat');}catch(e){zero();token=0;log('Kontrolle verloren. Roboter stoppt über Timeout.');refreshControls();}finally{pumpBusy=false;}}setTimeout(pump,100);}
+async function pump(){const started=performance.now();if(token&&!document.hidden&&!pumpBusy){pumpBusy=true;try{const moving=canDrive()&&(axes.drive||axes.turn);if(moving){const limit=Number($('speed').value);await command('move',{drive:Math.round(axes.drive*limit),turn:Math.round(axes.turn*limit)});}else await command('heartbeat');}catch(e){zero();token=0;log('Kontrolle verloren. Roboter stoppt über Timeout.');refreshControls();}finally{pumpBusy=false;}}setTimeout(pump,Math.max(0,100-(performance.now()-started)));}
 function mm(value){return value?(value/1000).toFixed(2)+' m':'—';}
-async function poll(){try{state=await request('/api/status');online=true;$('dot').classList.add('online');$('connection').textContent='ROBOTER VERBUNDEN';$('mode').textContent=state.mode;$('reason').textContent=state.reason;$('front').textContent=mm(state.frontMm);$('rear').textContent=mm(state.rearMm);$('coverage').textContent=Math.round(state.coverage/360*100)+' %';$('drive').textContent=state.drive+' %';$('turn').textContent=state.turn+' %';$('age').textContent=state.scanAgeMs===4294967295?'—':state.scanAgeMs+' ms';$('heap').textContent=Math.round(state.heap/1024)+' kB';$('packets').textContent=state.packets;$('crc').textContent=state.crcErrors;$('uptime').textContent=Math.floor(state.uptime/60)+' min';$('owner').textContent=token?'Dieses Gerät':state.controller?'Belegt':'Frei';$('version').textContent='v'+state.version;$('speed').max=state.manualLimit;$('scan-state').textContent=state.lidarHealthy?'LIVE SCAN':'SCAN NICHT BEREIT';if(state.reason!==lastReason){log(state.mode+' / '+state.reason);lastReason=state.reason;}if(state.mode!=='manual')zero();if(!state.lidarHealthy)$('warning').textContent='⚠ LIDAR nicht bereit: Auto gesperrt. Manuell ist ohne vollständige Hinderniserkennung möglich. Räder anheben und physische Abschaltung bereithalten.';else $('warning').textContent='⚠ Überwachter Testbetrieb. LIDAR erkennt keine Treppen oder Hindernisse außerhalb seiner Scanebene. Software-Stopp ersetzt keinen Hardware-Not-Aus.';}catch(e){online=false;zero();token=0;$('dot').classList.remove('online');$('connection').textContent='OFFLINE · FAHRT GESPERRT';$('scan-state').textContent='OFFLINE';}refreshControls();setTimeout(poll,300);}
-async function pollScan(){try{scanData=await request('/api/scan');$('rpm').textContent=scanData.fresh?scanData.rpm+' rpm':'—';}catch(e){scanData=null;}draw();setTimeout(pollScan,350);}
+async function poll(){
+	if(document.hidden){setTimeout(poll,1000);return;}
+	try{
+		state=await request('/api/status');
+		if(lastUptime&&state.uptime<lastUptime){zero();token=0;log('ESP32 neu gestartet.');}
+		lastUptime=state.uptime;statusFailures=0;online=true;
+		$('dot').classList.add('online');$('connection').textContent='ROBOTER VERBUNDEN';
+		$('mode').textContent=state.mode;$('reason').textContent=state.reason;
+		$('front').textContent=mm(state.frontMm);$('rear').textContent=mm(state.rearMm);
+		$('coverage').textContent=Math.round(state.coverage/360*100)+' %';
+		$('drive').textContent=state.drive+' %';$('turn').textContent=state.turn+' %';
+		$('age').textContent=state.scanAgeMs===4294967295?'—':state.scanAgeMs+' ms';
+		$('heap').textContent=Math.round(state.heap/1024)+' kB';$('packets').textContent=state.packets;
+		$('crc').textContent=state.crcErrors;$('uptime').textContent=state.uptime+' s';
+		$('owner').textContent=token?'Dieses Gerät':state.controller?'Belegt':'Frei';
+		$('version').textContent='v'+state.version;$('speed').max=state.manualLimit;
+		$('scan-state').textContent=state.lidarHealthy?'LIVE SCAN':'SCAN NICHT BEREIT';
+		if(state.reason!==lastReason){log(state.mode+' / '+state.reason);lastReason=state.reason;}
+		if(state.mode!=='manual')zero();
+		$('warning').textContent=state.lidarHealthy?'⚠ Überwachter Testbetrieb. LIDAR erkennt keine Treppen oder Hindernisse außerhalb seiner Scanebene. Software-Stopp ersetzt keinen Hardware-Not-Aus.':'⚠ LIDAR nicht bereit: Auto gesperrt. Manuell ohne vollständige Hinderniserkennung. Räder anheben und physische Abschaltung bereithalten.';
+		lidarDiagnostics(state);
+	}catch(e){
+		statusFailures++;releaseMotion();online=false;
+		if(token)action('stop');
+		$('dot').classList.remove('online');
+		$('connection').textContent=statusFailures===1?'TELEMETRIE VERZÖGERT · FAHRT GESPERRT':'OFFLINE · FAHRT GESPERRT';
+		$('scan-state').textContent='OFFLINE';
+		/* Telemetry timeout is not proof of a lost control lease. The
+		   control pump independently validates it; never resume movement. */
+	}
+	refreshControls();
+	/* Only one telemetry request at a time, no radar load during movement. */
+	if(online&&state?.lidarHealthy&&!axes.drive&&!axes.turn&&Date.now()-lastScanPoll>1000){
+		lastScanPoll=Date.now();await pollScan();
+	}else if(!state?.lidarHealthy){scanData=null;draw();}
+	setTimeout(poll,500);
+}
+async function pollScan(){try{scanData=await request('/api/scan');$('rpm').textContent=scanData.fresh?scanData.rpm+' rpm':'—';}catch(e){scanData=null;}draw();}
 function draw(){const canvas=$('radar'),rect=canvas.getBoundingClientRect(),ratio=devicePixelRatio||1;canvas.width=rect.width*ratio;canvas.height=rect.height*ratio;const c=canvas.getContext('2d');c.scale(ratio,ratio);const w=rect.width,h=rect.height,cx=w/2,cy=h/2,R=Math.min(w,h)*.41,scale=R/4000;c.clearRect(0,0,w,h);c.strokeStyle='#243849';c.lineWidth=1;c.fillStyle='#647e94';c.font='10px system-ui';for(let i=1;i<=4;i++){c.beginPath();c.arc(cx,cy,R*i/4,0,2*Math.PI);c.stroke();c.fillText(i+' m',cx+5,cy-R*i/4+12);}for(let a=0;a<360;a+=45){const rad=a*Math.PI/180;c.beginPath();c.moveTo(cx,cy);c.lineTo(cx+Math.sin(rad)*R,cy-Math.cos(rad)*R);c.stroke();}c.fillStyle='#9eb6c9';c.textAlign='center';c.fillText('VORNE',cx,cy-R-12);c.fillText('HINTEN',cx,cy+R+20);c.textAlign='start';c.strokeStyle='#ff667b88';c.setLineDash([4,4]);c.beginPath();c.arc(cx,cy,500*scale,0,Math.PI*2);c.stroke();c.setLineDash([]);if(online&&scanData?.fresh){scanData.distance.forEach((d,a)=>{if(!d||d>4000)return;const rad=a*Math.PI/180;c.fillStyle=d<=500?'#ff667b':'#56dfc0';c.beginPath();c.arc(cx+Math.sin(rad)*d*scale,cy-Math.cos(rad)*d*scale,2,0,2*Math.PI);c.fill();});}else{c.fillStyle='#8f9eb3';c.textAlign='center';c.fillText('KEINE FRISCHEN MESSDATEN',cx,cy+45);}c.fillStyle='#e7eef8';c.beginPath();c.moveTo(cx,cy-10);c.lineTo(cx+7,cy+7);c.lineTo(cx,cy+3);c.lineTo(cx-7,cy+7);c.closePath();c.fill();}
-window.addEventListener('resize',draw);draw();poll();pollScan();pump();
+function lidarDiagnostics(s){$('lidar-diagnostics').textContent='LIDAR: '+(s.lidarDiagnostic||'alte Firmware')+' · RX '+(s.lidarRxBytes??'—')+' Bytes · Header '+(s.lidarHeaders??'—')+' · verworfen '+(s.lidarRejected??'—')+' · GPIO '+(s.lidarRxPin??'—')+' / '+(s.lidarBaud??'—')+' Baud';}
+const diagnostic=document.createElement('p');diagnostic.id='lidar-diagnostics';diagnostic.className='small muted';$('log').before(diagnostic);
+window.addEventListener('resize',draw);draw();poll();pump();
 </script></body></html>

@@ -74,23 +74,26 @@ Die DC-Motoren werden **nicht über den ESP32** versorgt.
 |---|---|
 | Schwarz | +5 V |
 | Grün | GND |
-| Rot | GPIO 18 – Datenleitung (LiDAR TX → ESP32 RX) |
-| Weiß | **VORERST OFFEN LASSEN** |
+| Weiß | GPIO 18, **S**-Reihe – Datenleitung (LiDAR TX → ESP32 RX) |
+| Rot | **OFFEN LASSEN** – PWM-Eingang |
 
-### Wichtig zum weißen Kabel
+### Korrektur anhand der Herstellerunterlagen
 
-- Weiß offen → LiDAR dreht konstant
-- Weiß an GPIO 18 → LiDAR dreht ca. 3 s schnell, dann ca. 3 s langsam/nicht
+- Quelle: https://wiki.youyeetoo.com/en/Lidar/LD20, Abschnitt 3.1.1.
+- Die abgebildete Variante: Schwarz = +5 V, Grün = GND, Rot = PWM-Eingang,
+  Weiß = Datenleitung zum Controller-RX.
+- Der Sensor sendet nach stabilem Start selbstständig mit 230400 Baud, 8N1.
+- Umbauten nur stromlos. Am Expansion-Board D18/**S**, nicht D18/V oder G.
 
-Daher Weiß vorerst **nicht** mit dem ESP32 verbinden, bis die Pinbelegung
-des konkreten LiDARs verifiziert ist.
+Rot bleibt offen; Weiß wird mit dem RX des ESP32 verbunden.
 
 ### Offener Punkt
 
-Rot wurde bisher als PWM-/Steuerleitung angenommen. Nach LD06/LD19/LD20-Standard
-ist Rot die **UART-Datenleitung** (230400 Baud, 8N1) und Weiß die PWM-Drehzahl-
-steuerung. Das Projekt geht von dieser Standardbelegung aus
-(`SEEKER_PIN_LIDAR_RX = GPIO 18`) und muss beim ersten Test verifiziert werden.
+Die bisherige Annahme Rot = UART war falsch für die Herstellerabbildung.
+Der Hersteller warnt vor abweichenden Kabelchargen. Bei einem anderen Kabelsatz
+nach Stecker-Pinbelegung statt allein nach Farbe anschließen:
+1 = PWM/RX (Eingang), 2 = GND, 3 = TX (Ausgang), 4 = VCC (5 V).
+Steckerorientierung anhand der Herstellerzeichnung prüfen.
 
 ---
 
@@ -108,7 +111,7 @@ ESP32 GND
 | GPIO | Verwendung |
 |---|---|
 | GPIO 14 | L298N ENB (Drehmotor PWM) |
-| GPIO 18 | LiDAR Rot (UART2 RX) |
+| GPIO 18 | LiDAR Weiß (UART2 RX) |
 | GPIO 25 | L298N ENA (Fahrmotor PWM) |
 | GPIO 26 | L298N IN1 |
 | GPIO 27 | L298N IN2 |

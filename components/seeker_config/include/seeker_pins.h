@@ -46,16 +46,17 @@ extern "C" {
  *  Kabelbelegung laut aktueller Verkabelung:
  *    Schwarz -> +5 V
  *    Gruen   -> GND
- *    Rot     -> GPIO 18   (Datenleitung des LiDAR -> RX des ESP32)
- *    Weiss   -> OFFEN     (vermutlich PWM-Drehzahlsteuerung, NICHT belegen,
- *                          bis die Pinbelegung verifiziert ist)
+ *    Weiss   -> GPIO 18   (Datenleitung des LiDAR -> RX des ESP32)
+ *    Rot     -> OFFEN     (PWM-Eingang, nicht Datenleitung)
+ *  Herstellerabbildung: https://wiki.youyeetoo.com/en/Lidar/LD20
+ *  Abschnitt 3.1.1. Kabelchargen koennen abweichen: Steckerbelegung pruefen.
  *
  *  Der LD20 sendet seine Messdaten per UART (3.3 V TTL), typ. 230400 Baud, 8N1.
  *  Es wird nur empfangen -> TX bleibt unbelegt.
  * ========================================================================= */
-#define SEEKER_PIN_LIDAR_RX     GPIO_NUM_18   /**< Rot: LiDAR TX -> ESP32 RX  */
+#define SEEKER_PIN_LIDAR_RX     GPIO_NUM_18   /**< Weiss: LiDAR TX -> ESP32 RX */
 #define SEEKER_PIN_LIDAR_TX     (-1)          /**< nicht verwendet            */
-#define SEEKER_PIN_LIDAR_PWM    (-1)          /**< Weiss: vorerst OFFEN       */
+#define SEEKER_PIN_LIDAR_PWM    (-1)          /**< Rot: PWM-Eingang OFFEN      */
 
 #define SEEKER_LIDAR_UART_NUM   UART_NUM_2
 #define SEEKER_LIDAR_BAUDRATE   230400
@@ -87,7 +88,7 @@ extern "C" {
 #define SEEKER_STOP_DISTANCE_MM      500
 #define SEEKER_ROTATE_CLEARANCE_MM   550
 #define SEEKER_SLOW_DISTANCE_MM      1200
-#define SEEKER_MANUAL_MAX_PERCENT    35
+#define SEEKER_MANUAL_MAX_PERCENT    100
 #define SEEKER_AUTO_DRIVE_PERCENT    30
 #define SEEKER_AUTO_TURN_PERCENT     30
 #define SEEKER_CONTROL_TIMEOUT_MS    1200

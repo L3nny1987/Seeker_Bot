@@ -1,3 +1,21 @@
+# ESP-IDF first reads components in a script-only requirements pass.
+# Generate assets only in the real configure pass.
+if(NOT CMAKE_BUILD_EARLY_EXPANSION)
+# Keep compression in the build: no runtime heap/compression cost on ESP32.
+set(DASHBOARD_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/dashboard_asset.h")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/embed_dashboard.py")
+execute_process(
+    COMMAND "${PYTHON}" "${CMAKE_CURRENT_SOURCE_DIR}/../tools/embed_dashboard.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html" "${DASHBOARD_HEADER}"
+    RESULT_VARIABLE DASHBOARD_RESULT
+)
+if(NOT DASHBOARD_RESULT EQUAL 0)
+    message(FATAL_ERROR "Dashboard asset generation failed")
+endif()
+endif()
+
 idf_component_register(
     SRCS
         "main.c"
@@ -20,5 +38,8 @@ idf_component_register(
         esp_system
         nvs_flash
         espressif__cjson
-    EMBED_TXTFILES "web/index.html"
 )
+
+if(NOT CMAKE_BUILD_EARLY_EXPANSION)
+    target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+endif()
