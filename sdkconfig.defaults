@@ -1,0 +1,38 @@
+# ===========================================================================
+#  Seeker_Bot - Projektweite ESP-IDF Standardkonfiguration
+#  Diese Werte landen beim ersten Build in der generierten sdkconfig.*
+# ===========================================================================
+
+# --- CPU / Performance ------------------------------------------------------
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
+CONFIG_FREERTOS_HZ=1000
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# --- Flash ------------------------------------------------------------------
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# --- Main Task --------------------------------------------------------------
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# --- Logging ----------------------------------------------------------------
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
+
+# --- Konsole ----------------------------------------------------------------
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+
+# --- Watchdog ---------------------------------------------------------------
+# Wichtig fuer einen Roboter: haengende Tasks muessen einen Reset ausloesen,
+# damit die Motoren nicht unkontrolliert weiterlaufen.
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
+CONFIG_ESP_TASK_WDT_PANIC=y
+
+# --- Brownout ---------------------------------------------------------------
+# Motoren erzeugen Spannungseinbrueche -> Brownout-Detektor aktiv lassen.
+CONFIG_ESP_BROWNOUT_DET=y
+CONFIG_ESP_BROWNOUT_DET_LVL_SEL_7=y

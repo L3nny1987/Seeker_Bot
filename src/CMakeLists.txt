@@ -1,0 +1,24 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "navigation.c"
+        "robot_manager.c"
+        "network.c"
+        "web_server.c"
+    INCLUDE_DIRS
+        "."
+        "../include"
+    REQUIRES
+        seeker_config
+        track_drive
+        ld20_lidar
+        esp_timer
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_http_server
+        esp_system
+        nvs_flash
+        espressif__cjson
+    EMBED_TXTFILES "web/index.html"
+)

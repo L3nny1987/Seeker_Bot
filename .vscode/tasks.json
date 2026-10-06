@@ -1,0 +1,20 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "PlatformIO: Build Seeker Bot",
+			"type": "shell",
+			"command": "C:\\Users\\Lenna\\.platformio\\penv\\Scripts\\platformio.exe",
+			"args": [
+				"run",
+				"-e",
+				"seeker_bot"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build"
+		}
+	]
+}
