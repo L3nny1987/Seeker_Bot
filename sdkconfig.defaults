@@ -33,6 +33,6 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
 CONFIG_ESP_TASK_WDT_PANIC=y
 
 # --- Brownout ---------------------------------------------------------------
-# Motoren erzeugen Spannungseinbrueche -> Brownout-Detektor aktiv lassen.
+# Unterspannungsschutz aktiv; ESP32-Standardwert statt maximaler Schwelle.
 CONFIG_ESP_BROWNOUT_DET=y
-CONFIG_ESP_BROWNOUT_DET_LVL_SEL_7=y
+CONFIG_ESP_BROWNOUT_DET_LVL_SEL_0=y
