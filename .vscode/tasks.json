@@ -15,6 +15,13 @@
 				"$gcc"
 			],
 			"group": "build"
+		},
+		{
+			"label": "PlatformIO: Upload Seeker Bot COM4",
+			"type": "shell",
+			"command": "C:\\Users\\Lenna\\.platformio\\penv\\Scripts\\platformio.exe",
+			"args": ["run", "-e", "seeker_bot", "--target", "upload", "--upload-port", "COM4"],
+			"problemMatcher": ["$gcc"]
 		}
 	]
 }
