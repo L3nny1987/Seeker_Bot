@@ -6,6 +6,7 @@
 #include "esp_timer.h"
 #include "esp_random.h"
 #include "esp_task_wdt.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -29,7 +30,7 @@ static void stop_locked(robot_mode_t mode, const char *reason)
     s_status.mode = mode;
     s_status.reason = reason;
     if (track_drive_coast() != ESP_OK) {
-        track_drive_emergency_stop();
+        if (track_drive_emergency_stop() != ESP_OK) esp_restart();
         s_status.mode = ROBOT_FAULT;
         s_status.reason = "motor_fault";
     }
@@ -177,7 +178,7 @@ esp_err_t robot_manager_command(uint32_t token, uint32_t sequence, const char *c
     esp_err_t err = ESP_OK;
     /* Emergency shutdown does not require ownership; restart always does. */
     if (!strcmp(cmd, "estop")) {
-        track_drive_emergency_stop();
+        if (track_drive_emergency_stop() != ESP_OK) esp_restart();
         stop_locked(ROBOT_ESTOP, "operator_estop");
     } else if (!token || token != s_token || !lease_valid(now) || !s_status.network ||
                sequence <= s_sequence) err = ESP_ERR_INVALID_STATE;

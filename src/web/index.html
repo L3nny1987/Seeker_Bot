@@ -11,6 +11,12 @@
 @media(max-width:950px){.shell{padding:20px}.grid{grid-template-columns:1fr}.right{display:grid;grid-template-columns:1fr 1fr}.right .control-card{grid-column:1/-1}.control-area{gap:40px}.radar-wrap{max-height:420px}.stats{gap:8px}.stat{padding:10px}.stat strong{font-size:18px}}
 @media(max-width:540px){.shell{padding:16px}.right{display:flex}.card{padding:18px}.top-status{padding:8px;font-size:10px}header{gap:8px}.brand{gap:9px}h1{font-size:18px}.logo{width:38px;height:38px}.stats{grid-template-columns:1fr 1fr}.banner{font-size:12px}.control-area{gap:16px}footer{gap:15px}.eyebrow{font-size:9px}.details{gap:10px}}
 </style>
+<style>
+/* Keep controls usable on narrow phones without horizontal scrolling. */
+.card,.right{min-width:0}
+@media(max-width:950px){.grid{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:540px){.top-status{max-width:125px}.control-area{gap:8px}.joystick{width:130px;height:130px;flex-shrink:0}.dpad{grid-template-columns:repeat(3,32px);gap:4px}.small{overflow-wrap:anywhere}}
+</style>
 </head>
 <body><main class="shell">
 <header><div class="brand"><div class="logo" aria-hidden="true">◎</div><div><h1>SEEKER</h1><div class="eyebrow">Robot Operations Platform</div></div></div><div class="top-status"><i id="dot" class="dot"></i><span id="connection">VERBINDUNG WIRD AUFGEBAUT</span></div></header>
@@ -66,7 +72,7 @@ $('joystick').onpointermove=joystickMove;
 for(const name of ['pointerup','pointercancel','lostpointercapture'])$('joystick').addEventListener(name,e=>{if(e.pointerId===pointer)releaseMotion();});
 document.querySelectorAll('[data-drive]').forEach(button=>{button.onpointerdown=e=>{if(!canDrive())return;e.preventDefault();button.setPointerCapture(e.pointerId);setAxes(Number(button.dataset.drive),Number(button.dataset.turn));};for(const name of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(name,releaseMotion);});
 function keyboardAxes(){const up=keys.has('w')||keys.has('arrowup'),down=keys.has('s')||keys.has('arrowdown'),left=keys.has('a')||keys.has('arrowleft'),right=keys.has('d')||keys.has('arrowright');setAxes(Number(up)-Number(down),Number(right)-Number(left));}
-document.addEventListener('keydown',e=>{if(e.key===' '&&!['INPUT','BUTTON'].includes(e.target.tagName)){e.preventDefault();$('estop').click();return;}if(['INPUT','BUTTON'].includes(e.target.tagName))return;const k=e.key.toLowerCase();if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k)&&canDrive()){e.preventDefault();keys.add(k);keyboardAxes();}});
+document.addEventListener('keydown',e=>{if(e.key===' '&&e.target.tagName!=='INPUT'){e.preventDefault();$('estop').click();return;}if(e.target.tagName==='INPUT')return;const k=e.key.toLowerCase();if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k)&&canDrive()){e.preventDefault();keys.add(k);keyboardAxes();}});
 document.addEventListener('keyup',e=>{if(keys.delete(e.key.toLowerCase())){keyboardAxes();if(!keys.size)releaseMotion();}});
 window.addEventListener('blur',releaseMotion);
 document.addEventListener('visibilitychange',()=>{if(document.hidden){zero();if(token)action('stop');}});

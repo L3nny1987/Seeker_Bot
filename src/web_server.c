@@ -11,8 +11,8 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 
-extern const unsigned char page_start[] asm("_binary_web_index_html_start");
-extern const unsigned char page_end[] asm("_binary_web_index_html_end");
+extern const unsigned char page_start[] asm("_binary_index_html_start");
+extern const unsigned char page_end[] asm("_binary_index_html_end");
 static httpd_handle_t s_server;
 
 static void headers(httpd_req_t *req)
@@ -136,7 +136,7 @@ static esp_err_t control_handler(httpd_req_t *req)
     unsigned used = 0;
     while (used < req->content_len) {
         int n = httpd_req_recv(req, body + used, req->content_len - used);
-        if (n <= 0) return ESP_FAIL; /* No retry loop blocking control server. */
+        if (n <= 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "incomplete_body");
         used += n;
     }
     body[used] = 0;
