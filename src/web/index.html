@@ -19,12 +19,12 @@
 </style>
 </head>
 <body><main class="shell">
-<header><div class="brand"><div class="logo" aria-hidden="true">◎</div><div><h1>SEEKER</h1><div class="eyebrow">Robot Operations Platform</div></div></div><div class="top-status"><i id="dot" class="dot"></i><span id="connection">VERBINDUNG WIRD AUFGEBAUT</span></div></header>
+<header><div class="brand"><div class="logo" aria-hidden="true">◎</div><div><h1>SEEKER</h1><div class="eyebrow">Robot Operations Platform</div></div></div><div class="top-status"><i id="dot" class="dot"></i><span id="connection">VERBINDUNG WIRD AUFBAUT</span></div></header>
 <div class="banner" id="warning" role="status">⚠ Erstinbetriebnahme: Räder anheben. LIDAR-Ausrichtung, Motorrichtungen und Sicherheitsabstände prüfen. Physische Stromabschaltung bereithalten.</div>
 <div class="grid">
 <section class="card"><div class="card-head"><div><div class="eyebrow">Spatial awareness</div><h2>Live LIDAR · 360°</h2></div><span class="pill" id="scan-state">KEINE DATEN</span></div>
 <div class="radar-wrap"><canvas id="radar" aria-label="LIDAR-Distanzen relativ zum Roboter"></canvas><div class="radar-overlay">LOKALE SENSORANSICHT · KEINE SLAM-KARTE</div></div>
-<div class="legend"><span><b>●</b> Messpunkte</span><span><b>◌</b> 500 mm Stoppzone</span></div>
+<div class="legend"><span><b>●</b> Messpunkte</span><span><b>◌</b> <span id="zone-label">Stoppzone</span></span></div>
 <div class="stats"><div class="stat"><small>VORNE</small><strong id="front">—</strong></div><div class="stat"><small>HINTEN</small><strong id="rear">—</strong></div><div class="stat"><small>ABDECKUNG</small><strong id="coverage">—</strong></div><div class="stat"><small>DREHZAHL</small><strong id="rpm">—</strong></div></div>
 </section>
 <div class="right"><section class="card control-card"><div class="card-head"><div><div class="eyebrow">Robot manager</div><h2>Steuerzentrale</h2></div><span class="pill" id="mode">IDLE</span></div>
@@ -34,10 +34,10 @@
 <div class="control-area"><div id="joystick" class="joystick" aria-label="Joystick; alternativ Richtungstasten verwenden"><div id="knob" class="knob"></div></div><div class="dpad" aria-label="Richtungstasten"><button data-drive="1" data-turn="0" aria-label="Vorwärts">↑</button><button data-drive="0" data-turn="-1" aria-label="Links">←</button><button id="center" aria-label="Stopp">■</button><button data-drive="0" data-turn="1" aria-label="Rechts">→</button><button data-drive="-1" data-turn="0" aria-label="Rückwärts">↓</button></div></div>
 <div class="small muted">Gedrückt halten zum Fahren · WASD / Pfeiltasten · Leertaste = Not-Aus</div>
 <div class="axis"><span>Leistungslimit</span><strong><span id="speed-label">30</span> %</strong></div><input id="speed" class="slider" type="range" min="0" max="100" value="30" aria-label="Manuelle Motorleistung">
-<p class="small muted">Manuell bis 100 % einstellbar. Hohe Leistung nur mit frei aufgebockten Ketten testen. PWM-Prozent ist keine gemessene Geschwindigkeit. Bei etwa 90 % Anlaufschwelle auch Versorgung und Mechanik prüfen. Auto bleibt konservativ begrenzt.</p>
+<p class="small muted">PWM-Prozent ist keine gemessene Geschwindigkeit. Auto hat eigene Leistungswerte unten. Bleibt ein Motor bei geringer PWM stehen, seine Anlaufschwelle aufgebockt ermitteln – nicht automatisch Vollleistung verwenden.</p>
 <div class="axis"><span>Fahrt <strong id="drive">0 %</strong></span><span>Drehung <strong id="turn">0 %</strong></span></div>
 <button id="stop" class="full" disabled>Bewegung stoppen</button><button id="estop" class="danger full emergency">NOT-AUS · ANTRIEB SPERREN</button><button id="reset" class="full" style="margin-top:10px" disabled>Sperre / Fehler zurücksetzen</button>
-<div class="commission"><label><input id="checked" type="checkbox">Ich habe Motorrichtungen, LIDAR-Nullwinkel und Abstände für diesen Roboter geprüft. Auto benötigt durchgehende LIDAR-Daten; überwachte Testfahrt, maximal 60 Sekunden.</label><button id="commission" class="full" disabled>Inbetriebnahme für diesen Start bestätigen</button></div>
+<div class="commission"><label><input id="checked" type="checkbox">Ich habe Motorrichtungen, LIDAR-Nullwinkel und Abstände für diesen Roboter geprüft. Auto benötigt durchgehende LIDAR-Daten; nur überwachte Fahrt mit einstellbarem Zeitlimit.</label><button id="commission" class="full" disabled>Inbetriebnahme für diesen Start bestätigen</button></div>
 </section>
 <section class="card"><div class="card-head"><h2>Systemdiagnose</h2><span class="small muted" id="version">v—</span></div><div class="details"><div><span>Scan-Alter</span><strong id="age">—</strong></div><div><span>Freier Heap</span><strong id="heap">—</strong></div><div><span>UART-Pakete</span><strong id="packets">—</strong></div><div><span>CRC-Fehler</span><strong id="crc">—</strong></div><div><span>Laufzeit</span><strong id="uptime">—</strong></div><div><span>Kontrolle</span><strong id="owner">—</strong></div></div><ul class="log" id="log" aria-live="polite"></ul></section></div>
 </div><footer><span>SEEKER / ESP32 · L298N · FHL-LD20</span><span>Lokales WLAN · Keine Cloud · Kein Hardware-Not-Aus</span></footer>
@@ -46,11 +46,56 @@
 'use strict';
 const $=id=>document.getElementById(id);
 let token=0,sequence=0,state=null,online=false,axes={drive:0,turn:0},queue=Promise.resolve(),pumpBusy=false,scanData=null,lastReason='',pointer=null;
-let statusFailures=0,lastScanPoll=0,lastUptime=0;
+let statusFailures=0,lastUptime=0,linkLost=false;
 const keys=new Set();
+const autoHelp=document.createElement('p');autoHelp.className='small muted';autoHelp.textContent='Auto: Steuerung übernehmen → Bewegung stoppen (IDLE) → Parameter einstellen/übernehmen → Prüfhaken setzen → Inbetriebnahme bestätigen → Autonom. Der Roboter fährt in Richtung des freiesten Korridors (Roboterbreite berücksichtigt) und lenkt dabei. Bei Hindernis oder Feststecken: zur freien Lücke drehen, sonst bei freiem Heck zurücksetzen. Nach 4 Versuchen kurze Pause, dann neuer Versuch. Bei kurzem WLAN-Aussetzer hält er an und fährt weiter, sobald die Verbindung zurück ist. Nur unter Aufsicht; keine Odometrie.';document.querySelector('.commission').append(autoHelp);
+const autoReadiness=document.createElement('p');autoReadiness.id='auto-readiness';autoReadiness.className='small muted';document.querySelector('.commission').append(autoReadiness);
+const resetInfo=document.createElement('p');resetInfo.id='reset-info';resetInfo.className='small muted';$('log').before(resetInfo);
+const settingFields={
+ manualStopMm:['Manuell: Fahrstopp (mm)',100,2000],manualRotateMm:['Manuell: Drehfreiraum (mm)',100,2000],
+ autoStopMm:['Auto: Fahrstopp (mm)',100,2000],autoRotateMm:['Auto: Drehfreiraum (mm)',100,2000],autoSlowMm:['Auto: Langsamzone (mm)',101,4000],
+ autoDrivePercent:['Auto: Fahrtleistung (%)',1,100],autoTurnPercent:['Auto: Drehleistung (%)',1,100],autoSlowPercent:['Auto: Leistung in Langsamzone (%)',1,100],
+ rampMs:['Anfahrrampe 0 → 100 % (ms; 0 = aus)',0,5000],
+ reverseMs:['Auto: Rücksetzzeit nach Anfahrrampe (ms)',100,2000],
+ turnMs:['Auto: maximale Drehzeit nach Anfahrrampe (ms)',200,4000],
+ resumeMarginMm:['Auto: Freigabereserve über Fahrstopp (mm)',0,300],
+ robotWidthMm:['Roboterbreite (mm)',100,1000],
+ autoLimitS:['Auto: Zeitlimit (s)',10,3600]
+};
+const firmwareDefaults={"manualStopMm":100,"manualRotateMm":100,"autoStopMm":200,"autoRotateMm":100,"autoSlowMm":400,"autoDrivePercent":90,"autoTurnPercent":100,"autoSlowPercent":85,"rampMs":1000,"reverseMs":800,"turnMs":1600,"resumeMarginMm":50,"robotWidthMm":250,"autoLimitS":300};
+let settingsLoaded=false;
+const settingsCard=document.createElement('section');settingsCard.className='card';
+settingsCard.innerHTML='<h2>Bewegungsparameter</h2><p class="small muted">Abstände vom LIDAR, nicht von der Stoßstange. Drehfreiraum muss den gesamten Roboter abdecken. Änderungen nur im Stillstand (IDLE). Werte werden dauerhaft im ESP32 gespeichert und überstehen Neustarts. Rücksetzen und Drehen prüfen laufend die Messdaten; Zeitwerte sind Obergrenzen, keine garantierten Strecken.</p>';
+for(const [name,[label,min,max]] of Object.entries(settingFields)){
+ const row=document.createElement('label');row.className='axis';row.style.gap='12px';row.style.marginTop='12px';
+ const text=document.createElement('span');text.textContent=label;
+ const input=document.createElement('input');input.type='number';input.id='setting-'+name;input.min=min;input.max=max;input.step=1;input.required=true;input.style.width='95px';
+ row.append(text,input);settingsCard.append(row);
+}
+const loadDefaults=document.createElement('button');loadDefaults.id='load-defaults';loadDefaults.className='full';loadDefaults.style.marginTop='16px';loadDefaults.textContent='Standardwerte laden (danach übernehmen)';settingsCard.append(loadDefaults);
+loadDefaults.onclick=()=>{for(const [name,value] of Object.entries(firmwareDefaults))$('setting-'+name).value=value;log('Standardwerte eingetragen – zum Speichern „Parameter übernehmen“.');};
+const saveSettings=document.createElement('button');saveSettings.id='save-settings';saveSettings.className='full primary';saveSettings.style.marginTop='10px';saveSettings.textContent='Parameter übernehmen (IDLE)';settingsCard.append(saveSettings);
+document.querySelector('.right').append(settingsCard);
+saveSettings.onclick=async()=>{
+ if(!token||state?.mode!=='idle'){log('Erst Bewegung stoppen, dann Parameter übernehmen.');return;}
+ const values={};for(const name of Object.keys(settingFields)){const input=$('setting-'+name);if(!input.reportValidity())return;values[name]=Number(input.value);}
+ if(values.autoSlowMm<=values.autoStopMm+values.resumeMarginMm||values.autoSlowPercent>values.autoDrivePercent){log('Langsamzone muss größer als Stoppabstand + Freigabereserve sein; Langsamleistung darf Fahrtleistung nicht überschreiten.');return;}
+ if(!confirm('Neue Abstände und Motorleistungen übernehmen? Kleine Abstände/hohe PWM erhöhen das Kollisionsrisiko. Abstände müssen Robotergröße und Bremsweg berücksichtigen.'))return;
+ try{await command('settings',values);settingsLoaded=false;log('Parameter übernommen und gespeichert.');}catch(e){log(e.message);}
+};
+const reasonText={manual:'Manuelle Steuerung',manual_ready:'Manuell bereit – Taste gedrückt halten',deadman_timeout:'Taste losgelassen / kein aktueller Fahrbefehl',front_obstacle:'Vorwärts gesperrt: Fahrstoppabstand unterschritten',rear_obstacle:'Rückwärts gesperrt: Fahrstoppabstand unterschritten',rotation_obstacle:'Drehung gesperrt: Drehfreiraum unterschritten',unknown_space:'Auto wartet: Vorwärtssektor enthält unbekannte Bereiche',blocked:'Auto blockiert: vorne zu nah und kein sicherer Drehfreiraum',cruise:'Auto fährt – PWM unter der Motor-Anlaufschwelle kann Stillstand bedeuten',avoid:'Auto dreht zur Ausweichrichtung',lidar_stale_or_incomplete:'Auto gestoppt: Scan zu alt oder unvollständig',avoidance_timeout:'Ausweichen nach 3 s gestoppt',auto_time_limit:'Autonome Fahrt: Zeitlimit erreicht',settings_updated:'Parameter übernommen und gespeichert'};
+Object.assign(reasonText,{escape_brake:'Ausweichen: Antrieb aus vor Richtungswechsel',escape_reverse:'Ausweichen: Rücksetzen mit laufender Heckprüfung',escape_turn:'Ausweichen: Drehen zur gewählten Seite',escape_rotation_blocked:'Drehung aktuell nicht sicher: erneut prüfen',escape_no_safe_path:'Kein gemessener freier Weg: Heck und Drehraum prüfen',escape_exhausted:'4 Ausweichversuche ohne Erfolg – kurze Pause, dann neuer Versuch',
+ cruise_steer:'Auto fährt und lenkt zum freiesten Korridor',turn_to_gap:'Auto dreht zur erkannten Lücke',front_blocked:'Vorne blockiert – Ausweichmanöver',stuck_no_progress:'Kein Fortschritt erkannt (festgefahren?) – Ausweichmanöver',link_wait:'WLAN-Aussetzer: Roboter wartet auf Verbindung',lidar_wait:'LIDAR-Aussetzer: Roboter wartet auf vollständigen Scan',controller_timeout:'Steuerung abgelaufen (keine Verbindung) – gestoppt'});
 function log(text){const li=document.createElement('li');li.textContent=new Date().toLocaleTimeString('de-DE')+' · '+text;$('log').prepend(li);while($('log').children.length>6)$('log').lastChild.remove();}
-async function request(path,body){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),body?850:2000);try{const response=await fetch(path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json','X-Seeker-Control':'1'}:{},body:body?JSON.stringify(body):undefined,cache:'no-store',signal:controller.signal});if(!response.ok)throw new Error(response.status===409?'Steuerung belegt oder Befehl im aktuellen Zustand gesperrt.':'Anfrage fehlgeschlagen ('+response.status+')');return await response.json();}finally{clearTimeout(timer);}}
-function command(command,extra={}){const body={command,token,sequence:++sequence,...extra};const result=queue.then(()=>request('/api/control',body));queue=result.catch(()=>{});return result;}
+async function request(path,body){
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),body?1000:2000);
+ try{
+  const response=await fetch(path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json','X-Seeker-Control':'1'}:{},body:body?JSON.stringify(body):undefined,cache:'no-store',signal:controller.signal});
+  if(!response.ok){const error=new Error(response.status===409?'Steuerung belegt, abgelaufen oder Befehl gesperrt.':'Anfrage fehlgeschlagen ('+response.status+')');error.controlRejected=true;throw error;}
+  return await response.json();
+ }finally{clearTimeout(timer);}
+}
+function command(command,extra={}){const owner=token;const result=queue.then(()=>{if(command!=='estop'&&(!owner||owner!==token))throw new Error('Steuerungskennung nicht mehr gültig.');return request('/api/control',{command,token:owner,sequence:++sequence,...extra});});queue=result.catch(()=>{});return result;}
 function action(commandName,extra={}){return command(commandName,extra).catch(e=>{log(e.message);});}
 function canDrive(){return online&&token&&state?.mode==='manual';}
 function zero(){axes={drive:0,turn:0};keys.clear();pointer=null;$('knob').style.transform='translate(0,0)';}
@@ -79,47 +124,94 @@ document.addEventListener('keyup',e=>{if(keys.delete(e.key.toLowerCase())){keybo
 window.addEventListener('blur',releaseMotion);
 document.addEventListener('visibilitychange',()=>{if(document.hidden){zero();if(token)action('stop');}});
 window.addEventListener('pagehide',()=>{zero();if(token)fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json','X-Seeker-Control':'1'},body:JSON.stringify({command:'release',token,sequence:++sequence}),keepalive:true}).catch(()=>{});});
-async function pump(){const started=performance.now();if(token&&!document.hidden&&!pumpBusy){pumpBusy=true;try{const moving=canDrive()&&(axes.drive||axes.turn);if(moving){const limit=Number($('speed').value);await command('move',{drive:Math.round(axes.drive*limit),turn:Math.round(axes.turn*limit)});}else await command('heartbeat');}catch(e){zero();token=0;log('Kontrolle verloren. Roboter stoppt über Timeout.');refreshControls();}finally{pumpBusy=false;}}setTimeout(pump,Math.max(0,100-(performance.now()-started)));}
+async function pump(){
+ const started=performance.now();
+ const moving=canDrive()&&(axes.drive||axes.turn);
+ if(token&&!document.hidden&&!pumpBusy){
+  pumpBusy=true;
+  try{
+	if(moving){const limit=Number($('speed').value);await command('move',{drive:Math.round(axes.drive*limit),turn:Math.round(axes.turn*limit)});}
+	else await command('heartbeat');
+	if(linkLost){linkLost=false;log('Steuerverbindung wieder stabil.');}
+  }catch(e){
+	zero();
+	/* Only an explicit server rejection ends ownership. A lost packet keeps
+	   the token: the next heartbeat (fresh sequence) renews the lease, and the
+	   ESP32 holds the robot still until heartbeats return. Never repeat MOVE. */
+	if(e.controlRejected){token=0;log('Kontrolle verloren: '+e.message);}
+	else if(!linkLost){linkLost=true;log('Steuerverbindung gestört – Roboter hält an, Verbindung wird gehalten.');}
+	refreshControls();
+  }finally{pumpBusy=false;}
+ }
+ setTimeout(pump,Math.max(0,(moving?100:250)-(performance.now()-started)));
+}
 function mm(value){return value?(value/1000).toFixed(2)+' m':'—';}
 async function poll(){
 	if(document.hidden){setTimeout(poll,1000);return;}
+	const started=performance.now();
 	try{
-		state=await request('/api/status');
-		if(lastUptime&&state.uptime<lastUptime){zero();token=0;log('ESP32 neu gestartet.');}
+		state=await request('/api/telemetry');
+		if(lastUptime&&state.uptime<lastUptime){zero();token=0;settingsLoaded=false;log('ESP32 neu gestartet.');}
 		lastUptime=state.uptime;statusFailures=0;online=true;
+		if(token&&state.controller===false){zero();token=0;log('ESP32 hat die Steuerung freigegeben: '+state.reason);}
 		$('dot').classList.add('online');$('connection').textContent='ROBOTER VERBUNDEN';
-		$('mode').textContent=state.mode;$('reason').textContent=state.reason;
+		$('mode').textContent=state.mode;$('reason').textContent=reasonText[state.reason]||state.reason;
+		if(state.settings&&!settingsLoaded){for(const name of Object.keys(settingFields))$('setting-'+name).value=state.settings[name];settingsLoaded=true;}
+		$('save-settings').disabled=!token||!online||state.mode!=='idle'||!state.settings;
+		const forwardClear=state.frontKnown&&state.frontMm>state.settings?.autoStopMm+state.settings?.resumeMarginMm;
+		const rearClear=state.rearKnown&&state.rearMm>state.settings?.autoStopMm+state.settings?.resumeMarginMm;
+		const turnClear=state.rotationKnown&&state.nearestMm>state.settings?.autoRotateMm;
+		$('auto-readiness').textContent=state.mode==='auto'?'Auto: '+state.autoPhase+' · Auslöser '+(state.autoTrigger||'—')+' · Versuch '+state.escapeAttempts+'/4 · Kurs '+(state.navHeading??0)+'° · Korridor '+mm(state.navCenterMm)+' · Rest '+(state.autoRemainingS??'—')+' s':!state.lidarHealthy?'Auto gesperrt: Scan zu alt/unvollständig.':!state.commissioned?'Auto gesperrt: Inbetriebnahme bestätigen.':forwardClear?'Vorwärtsweg frei.':rearClear?'Vorwärtsweg blockiert/unbekannt; Rücksetzen möglich.':turnClear?'Vorwärtsweg blockiert; Drehung möglich.':'Auto wartet: weder Vorwärts-/Rückwärtsweg noch Drehraum nachgewiesen frei.';
+		const stopZone=state.settings?(state.mode==='auto'?state.settings.autoStopMm:state.settings.manualStopMm):500;
+		$('zone-label').textContent=stopZone+' mm Stoppzone';
 		$('front').textContent=mm(state.frontMm);$('rear').textContent=mm(state.rearMm);
 		$('coverage').textContent=Math.round(state.coverage/360*100)+' %';
 		$('drive').textContent=state.drive+' %';$('turn').textContent=state.turn+' %';
 		$('age').textContent=state.scanAgeMs===4294967295?'—':state.scanAgeMs+' ms';
 		$('heap').textContent=Math.round(state.heap/1024)+' kB';$('packets').textContent=state.packets;
 		$('crc').textContent=state.crcErrors;$('uptime').textContent=state.uptime+' s';
-		$('owner').textContent=token?'Dieses Gerät':state.controller?'Belegt':'Frei';
+		const resetLabels={power_on:'Einschalten (auch kompletter Spannungsausfall möglich)',brownout:'Unterspannung / Brownout',panic:'Software-Panic',software_reset:'Software-Neustart',task_watchdog:'Task-Watchdog',interrupt_watchdog:'Interrupt-Watchdog',watchdog:'Watchdog',external_reset:'Externer Reset'};
+		$('reset-info').textContent='Letzter Neustart: '+(resetLabels[state.resetReasonText]||state.resetReasonText||state.resetReason)+' · WLAN '+(state.wifiRssi??'—')+' dBm';
+		$('owner').textContent=(token?'Dieses Gerät':state.controller?'Belegt':'Frei')+(state.heartbeatAgeMs!==undefined&&state.heartbeatAgeMs!==4294967295?' · Heartbeat '+state.heartbeatAgeMs+' ms':'');
 		$('version').textContent='v'+state.version;$('speed').max=state.manualLimit;
 		$('scan-state').textContent=state.lidarHealthy?'LIVE SCAN':'SCAN NICHT BEREIT';
 		if(state.reason!==lastReason){log(state.mode+' / '+state.reason);lastReason=state.reason;}
 		if(state.mode!=='manual')zero();
 		$('warning').textContent=state.lidarHealthy?'⚠ Überwachter Testbetrieb. LIDAR erkennt keine Treppen oder Hindernisse außerhalb seiner Scanebene. Software-Stopp ersetzt keinen Hardware-Not-Aus.':'⚠ LIDAR nicht bereit: Auto gesperrt. Manuell ohne vollständige Hinderniserkennung. Räder anheben und physische Abschaltung bereithalten.';
 		lidarDiagnostics(state);
+		scanData=state.scan||null;
+		$('rpm').textContent=scanData?.fresh?scanData.rpm+' rpm':'—';
 	}catch(e){
-		statusFailures++;releaseMotion();online=false;
-		if(token)action('stop');
+		statusFailures++;online=false;zero();
+		/* A telemetry timeout does not stop the robot: the control pump keeps
+		   the lease, and the ESP32 itself pauses auto on a real link loss. */
 		$('dot').classList.remove('online');
 		$('connection').textContent=statusFailures===1?'TELEMETRIE VERZÖGERT · FAHRT GESPERRT':'OFFLINE · FAHRT GESPERRT';
 		$('scan-state').textContent='OFFLINE';
+		scanData=null;
 		/* Telemetry timeout is not proof of a lost control lease. The
 		   control pump independently validates it; never resume movement. */
 	}
 	refreshControls();
-	/* Only one telemetry request at a time, no radar load during movement. */
-	if(online&&state?.lidarHealthy&&!axes.drive&&!axes.turn&&Date.now()-lastScanPoll>1000){
-		lastScanPoll=Date.now();await pollScan();
-	}else if(!state?.lidarHealthy){scanData=null;draw();}
-	setTimeout(poll,500);
+	/* Single-flight 5 Hz telemetry; independent 100 ms control heartbeat.
+	   Never pause the radar during movement or stack slow requests. */
+	draw();
+	setTimeout(poll,Math.max(50,200-(performance.now()-started)));
 }
-async function pollScan(){try{scanData=await request('/api/scan');$('rpm').textContent=scanData.fresh?scanData.rpm+' rpm':'—';}catch(e){scanData=null;}draw();}
-function draw(){const canvas=$('radar'),rect=canvas.getBoundingClientRect(),ratio=devicePixelRatio||1;canvas.width=rect.width*ratio;canvas.height=rect.height*ratio;const c=canvas.getContext('2d');c.scale(ratio,ratio);const w=rect.width,h=rect.height,cx=w/2,cy=h/2,R=Math.min(w,h)*.41,scale=R/4000;c.clearRect(0,0,w,h);c.strokeStyle='#243849';c.lineWidth=1;c.fillStyle='#647e94';c.font='10px system-ui';for(let i=1;i<=4;i++){c.beginPath();c.arc(cx,cy,R*i/4,0,2*Math.PI);c.stroke();c.fillText(i+' m',cx+5,cy-R*i/4+12);}for(let a=0;a<360;a+=45){const rad=a*Math.PI/180;c.beginPath();c.moveTo(cx,cy);c.lineTo(cx+Math.sin(rad)*R,cy-Math.cos(rad)*R);c.stroke();}c.fillStyle='#9eb6c9';c.textAlign='center';c.fillText('VORNE',cx,cy-R-12);c.fillText('HINTEN',cx,cy+R+20);c.textAlign='start';c.strokeStyle='#ff667b88';c.setLineDash([4,4]);c.beginPath();c.arc(cx,cy,500*scale,0,Math.PI*2);c.stroke();c.setLineDash([]);if(online&&scanData?.fresh){scanData.distance.forEach((d,a)=>{if(!d||d>4000)return;const rad=a*Math.PI/180;c.fillStyle=d<=500?'#ff667b':'#56dfc0';c.beginPath();c.arc(cx+Math.sin(rad)*d*scale,cy-Math.cos(rad)*d*scale,2,0,2*Math.PI);c.fill();});}else{c.fillStyle='#8f9eb3';c.textAlign='center';c.fillText('KEINE FRISCHEN MESSDATEN',cx,cy+45);}c.fillStyle='#e7eef8';c.beginPath();c.moveTo(cx,cy-10);c.lineTo(cx+7,cy+7);c.lineTo(cx,cy+3);c.lineTo(cx-7,cy+7);c.closePath();c.fill();}
+function draw(){const canvas=$('radar'),rect=canvas.getBoundingClientRect(),ratio=devicePixelRatio||1;
+ canvas.width=rect.width*ratio;canvas.height=rect.height*ratio;
+ const c=canvas.getContext('2d');c.scale(ratio,ratio);
+ const w=rect.width,h=rect.height,cx=w/2,cy=h/2,R=Math.min(w,h)*.41,scale=R/4000;
+ const stopZone=state?.settings?(state.mode==='auto'?state.settings.autoStopMm:state.settings.manualStopMm):500;
+ c.clearRect(0,0,w,h);c.strokeStyle='#243849';c.lineWidth=1;c.fillStyle='#647e94';c.font='10px system-ui';
+ for(let i=1;i<=4;i++){c.beginPath();c.arc(cx,cy,R*i/4,0,2*Math.PI);c.stroke();c.fillText(i+' m',cx+5,cy-R*i/4+12);}
+ for(let a=0;a<360;a+=45){const rad=a*Math.PI/180;c.beginPath();c.moveTo(cx,cy);c.lineTo(cx+Math.sin(rad)*R,cy-Math.cos(rad)*R);c.stroke();}
+ c.fillStyle='#9eb6c9';c.textAlign='center';c.fillText('VORNE',cx,cy-R-12);c.fillText('HINTEN',cx,cy+R+20);c.textAlign='start';
+ c.strokeStyle='#ff667b88';c.setLineDash([4,4]);c.beginPath();c.arc(cx,cy,stopZone*scale,0,Math.PI*2);c.stroke();c.setLineDash([]);
+ if(online&&scanData?.fresh){scanData.distance.forEach((d,a)=>{if(!d||d>4000)return;const rad=a*Math.PI/180;c.fillStyle=d<=stopZone?'#ff667b':'#56dfc0';c.beginPath();c.arc(cx+Math.sin(rad)*d*scale,cy-Math.cos(rad)*d*scale,2,0,2*Math.PI);c.fill();});}
+ else{c.fillStyle='#8f9eb3';c.textAlign='center';c.fillText('KEINE FRISCHEN MESSDATEN',cx,cy+45);}
+ c.fillStyle='#e7eef8';c.beginPath();c.moveTo(cx,cy-10);c.lineTo(cx+7,cy+7);c.lineTo(cx,cy+3);c.lineTo(cx-7,cy+7);c.closePath();c.fill();
+}
 function lidarDiagnostics(s){$('lidar-diagnostics').textContent='LIDAR: '+(s.lidarDiagnostic||'alte Firmware')+' · RX '+(s.lidarRxBytes??'—')+' Bytes · Header '+(s.lidarHeaders??'—')+' · verworfen '+(s.lidarRejected??'—')+' · GPIO '+(s.lidarRxPin??'—')+' / '+(s.lidarBaud??'—')+' Baud';}
 const diagnostic=document.createElement('p');diagnostic.id='lidar-diagnostics';diagnostic.className='small muted';$('log').before(diagnostic);
 window.addEventListener('resize',draw);draw();poll();pump();

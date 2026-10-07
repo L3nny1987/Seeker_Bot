@@ -24,14 +24,24 @@ static esp_err_t axis(ledc_channel_t channel, gpio_num_t a, gpio_num_t b,
     if (inverted) { value = -value; previous = -previous; }
     /* Avoid cutting the PWM output every manager cycle at constant duty. */
     if (value == previous) return ESP_OK;
-    esp_err_t err = ledc_set_duty(SEEKER_PWM_MODE, channel, 0);
-    if (err == ESP_OK) err = ledc_update_duty(SEEKER_PWM_MODE, channel);
-    if (err != ESP_OK) return err;
-    if (value * previous < 0) esp_rom_delay_us(1000);
-    err = gpio_set_level(a, value > 0);
-    if (err == ESP_OK) err = gpio_set_level(b, value < 0);
     unsigned magnitude = value < 0 ? -value : value;
-    if (err == ESP_OK) err = ledc_set_duty(SEEKER_PWM_MODE, channel, magnitude * 1023 / 100);
+    esp_err_t err = ESP_OK;
+    bool same_direction = (value > 0 && previous > 0) || (value < 0 && previous < 0);
+    if (!same_direction) {
+        /* Direction change or start/stop: cut power before touching the
+           H-bridge inputs. Ramp steps in one direction only update duty,
+           so the motor no longer sees a 0 % pulse every 20 ms. */
+        err = ledc_set_duty(SEEKER_PWM_MODE, channel, 0);
+        if (err == ESP_OK) err = ledc_update_duty(SEEKER_PWM_MODE, channel);
+        if (err != ESP_OK) return err;
+        if (value * previous < 0) esp_rom_delay_us(1000);
+        err = gpio_set_level(a, value > 0);
+        if (err == ESP_OK) err = gpio_set_level(b, value < 0);
+        if (err != ESP_OK || !value) return err;
+    }
+    /* Classic ESP32 supports 2^resolution as constant HIGH. At 100% this
+       matches the verified sketch's digitalWrite(ENA/ENB, HIGH). */
+    err = ledc_set_duty(SEEKER_PWM_MODE, channel, magnitude * 1024 / 100);
     if (err == ESP_OK) err = ledc_update_duty(SEEKER_PWM_MODE, channel);
     return err;
 }

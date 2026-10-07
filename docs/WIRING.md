@@ -23,6 +23,14 @@ Der Roboter hat **keinen** klassischen Differentialantrieb:
 Beide Achsen sind unabhängig und können gleichzeitig angesteuert werden
 (Kurvenfahrt = Fahrt ≠ 0 **und** Drehung ≠ 0).
 
+Bestätigte Richtungen anhand des funktionierenden Motortests:
+- Vorwärts: IN1 HIGH, IN2 LOW; rückwärts umgekehrt.
+- Links: IN3 HIGH, IN4 LOW; rechts umgekehrt.
+- API: Fahrt positiv = vorwärts, Drehung negativ = links.
+    Deshalb ist `SEEKER_TURN_INVERTED = 1` gesetzt.
+- Die Firmware regelt ENA/ENB weiterhin per PWM; bei 100 % dauerhaft HIGH.
+    Stopps und Not-Aus schalten beide PWM-Ausgänge ab.
+
 ---
 
 ## 1. ESP32 → L298N
@@ -86,6 +94,10 @@ Die DC-Motoren werden **nicht über den ESP32** versorgt.
 - Umbauten nur stromlos. Am Expansion-Board D18/**S**, nicht D18/V oder G.
 
 Rot bleibt offen; Weiß wird mit dem RX des ESP32 verbunden.
+
+Einbaukalibrierung: Rohwinkel 180° zeigt nach vorne
+(`SEEKER_LIDAR_FRONT_DEG = 180`, Winkel wachsen im Uhrzeigersinn).
+Radar und Hinderniserkennung verwenden dieselbe Ausrichtung.
 
 ### Offener Punkt
 

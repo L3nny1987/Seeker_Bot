@@ -7,7 +7,6 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
-#include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
@@ -55,12 +54,7 @@ esp_err_t seeker_network_init(void)
     _Static_assert(sizeof(_WIFI_SSID) <= 33, "SSID too long");
     _Static_assert(sizeof(_WIFI_PASS) <= 64, "WPA passphrase too long");
     if (strlen(_WIFI_SSID) == 0 || strlen(_WIFI_PASS) < 8) return ESP_ERR_INVALID_ARG;
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-    if (err != ESP_OK) return err;
+    /* NVS is initialised in app_main before the robot manager. */
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_t *netif = esp_netif_create_default_wifi_sta();

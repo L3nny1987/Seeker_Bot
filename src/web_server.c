@@ -3,6 +3,8 @@
 #include "ld20_lidar.h"
 #include "seeker_pins.h"
 #include <math.h>
+#include <stdarg.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -14,8 +16,45 @@
 #include "lwip/sockets.h"
 #include "lwip/tcp.h"
 #include "esp_wifi.h"
+#include "reset_diagnostics.h"
 
 static httpd_handle_t s_server;
+
+/* The HTTP server runs all handlers on one task, so a single static buffer
+   is safe and avoids hundreds of heap allocations per telemetry frame. */
+static char s_json[6144];
+typedef struct { size_t used; bool overflow; } writer_t;
+
+static void put(writer_t *w, const char *format, ...)
+{
+    if (w->overflow) return;
+    va_list args;
+    va_start(args, format);
+    int n = vsnprintf(s_json + w->used, sizeof(s_json) - w->used, format, args);
+    va_end(args);
+    if (n < 0 || (size_t)n >= sizeof(s_json) - w->used) w->overflow = true;
+    else w->used += n;
+}
+
+static const char *json_bool(bool value) { return value ? "true" : "false"; }
+
+static const struct { const char *name; size_t offset; } SETTINGS_FIELDS[] = {
+    {"manualStopMm", offsetof(motion_settings_t, manual_stop_mm)},
+    {"manualRotateMm", offsetof(motion_settings_t, manual_rotate_mm)},
+    {"autoStopMm", offsetof(motion_settings_t, auto_stop_mm)},
+    {"autoRotateMm", offsetof(motion_settings_t, auto_rotate_mm)},
+    {"autoSlowMm", offsetof(motion_settings_t, auto_slow_mm)},
+    {"autoDrivePercent", offsetof(motion_settings_t, auto_drive_percent)},
+    {"autoTurnPercent", offsetof(motion_settings_t, auto_turn_percent)},
+    {"autoSlowPercent", offsetof(motion_settings_t, auto_slow_percent)},
+    {"rampMs", offsetof(motion_settings_t, ramp_ms)},
+    {"reverseMs", offsetof(motion_settings_t, reverse_ms)},
+    {"turnMs", offsetof(motion_settings_t, turn_ms)},
+    {"resumeMarginMm", offsetof(motion_settings_t, resume_margin_mm)},
+    {"robotWidthMm", offsetof(motion_settings_t, robot_width_mm)},
+    {"autoLimitS", offsetof(motion_settings_t, auto_limit_s)},
+};
+#define SETTINGS_COUNT (sizeof(SETTINGS_FIELDS) / sizeof(SETTINGS_FIELDS[0]))
 
 static esp_err_t socket_open(httpd_handle_t server, int socket)
 {
@@ -36,17 +75,20 @@ static void headers(httpd_req_t *req)
         "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; connect-src 'self'; object-src 'none'");
 }
 
-static esp_err_t json_reply(httpd_req_t *req, cJSON *root)
+static esp_err_t json_reply(httpd_req_t *req, const writer_t *w)
 {
-    if (!root) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "allocation_failed");
-    char *text = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!text) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "allocation_failed");
+    if (w->overflow) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "response_too_large");
     headers(req);
     httpd_resp_set_type(req, "application/json");
-    esp_err_t err = httpd_resp_send(req, text, HTTPD_RESP_USE_STRLEN);
-    free(text);
-    return err;
+    return httpd_resp_send(req, s_json, w->used);
+}
+
+static esp_err_t text_reply(httpd_req_t *req, const char *status, const char *json)
+{
+    if (status) httpd_resp_set_status(req, status);
+    headers(req);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
 }
 
 static esp_err_t index_handler(httpd_req_t *req)
@@ -66,72 +108,82 @@ static esp_err_t index_handler(httpd_req_t *req)
     return httpd_resp_send_chunk(req, NULL, 0);
 }
 
+static void scan_json(writer_t *w)
+{
+    static ld20_scan_t scan;
+    bool fresh = ld20_lidar_get_scan(&scan, 0) == ESP_OK;
+    put(w, "{\"fresh\":%s,\"rpm\":%u,\"sequence\":%lu,\"ageMs\":%lu,\"distance\":[",
+        json_bool(fresh), (unsigned)scan.speed_rpm, (unsigned long)scan.sequence,
+        (unsigned long)(scan.timestamp_us ? (esp_timer_get_time() - scan.timestamp_us) / 1000 : UINT32_MAX));
+    for (int i = 0; i < 360; i++) {
+        int raw = (SEEKER_LIDAR_FRONT_DEG + (SEEKER_LIDAR_CLOCKWISE ? i : -i) + 720) % 360;
+        put(w, i ? ",%u" : "%u", (unsigned)scan.distance_mm[raw]);
+    }
+    put(w, "]}");
+}
+
 static esp_err_t status_handler(httpd_req_t *req)
 {
     robot_status_t s = robot_manager_status();
     ld20_stats_t stats = ld20_lidar_get_stats();
-    cJSON *j = cJSON_CreateObject();
-    if (!j) return json_reply(req, NULL);
-    cJSON_AddStringToObject(j, "version", SEEKER_BOT_VERSION);
-    cJSON_AddStringToObject(j, "mode", robot_mode_name(s.mode));
-    cJSON_AddStringToObject(j, "reason", s.reason);
-    cJSON_AddBoolToObject(j, "network", s.network);
-    cJSON_AddBoolToObject(j, "controller", s.controller);
-    cJSON_AddBoolToObject(j, "commissioned", s.commissioned);
-    cJSON_AddBoolToObject(j, "lidarHealthy", s.lidar_healthy);
-    cJSON_AddNumberToObject(j, "drive", s.drive);
-    cJSON_AddNumberToObject(j, "turn", s.turn);
-    cJSON_AddNumberToObject(j, "coverage", s.coverage);
-    cJSON_AddNumberToObject(j, "scanAgeMs", s.scan_age_ms);
-    cJSON_AddNumberToObject(j, "scanSequence", s.scan_sequence);
-    cJSON_AddNumberToObject(j, "frontMm", s.view.front_mm);
-    cJSON_AddNumberToObject(j, "rearMm", s.view.rear_mm);
-    cJSON_AddNumberToObject(j, "leftMm", s.view.left_mm);
-    cJSON_AddNumberToObject(j, "rightMm", s.view.right_mm);
-    cJSON_AddNumberToObject(j, "nearestMm", s.view.nearest_mm);
-    cJSON_AddNumberToObject(j, "packets", stats.packets);
-    cJSON_AddNumberToObject(j, "lidarRxBytes", stats.rx_bytes);
-    cJSON_AddNumberToObject(j, "lidarHeaders", stats.headers);
-    cJSON_AddNumberToObject(j, "lidarRejected", stats.rejected_packets);
-    cJSON_AddNumberToObject(j, "lidarRxPin", SEEKER_PIN_LIDAR_RX);
-    cJSON_AddNumberToObject(j, "lidarBaud", SEEKER_LIDAR_BAUDRATE);
+    writer_t w = {0};
     char sample[sizeof(stats.sample) * 2 + 1] = {0};
-    for (unsigned i = 0; i < stats.sample_len; i++)
+    for (unsigned i = 0; i < stats.sample_len && i < sizeof(stats.sample); i++)
         snprintf(sample + i * 2, 3, "%02X", stats.sample[i]);
-    cJSON_AddStringToObject(j, "lidarRawSample", sample);
-    cJSON_AddStringToObject(j, "lidarDiagnostic", !stats.rx_bytes ? "no_uart_bytes" :
+    const char *diagnostic = !stats.rx_bytes ? "no_uart_bytes" :
         !stats.headers ? "no_ld_header" : !stats.packets ? "no_valid_packets" :
         !s.scan_sequence ? "waiting_for_revolution" :
-        !s.lidar_healthy ? "stale_or_incomplete_scan" : "healthy");
-    cJSON_AddNumberToObject(j, "crcErrors", stats.crc_errors);
-    cJSON_AddNumberToObject(j, "heap", esp_get_free_heap_size());
-    cJSON_AddNumberToObject(j, "uptime", esp_timer_get_time() / 1000000);
-    cJSON_AddNumberToObject(j, "resetReason", esp_reset_reason());
+        !s.lidar_healthy ? "stale_or_incomplete_scan" : "healthy";
+    put(&w, "{\"version\":\"%s\",\"mode\":\"%s\",\"reason\":\"%s\",\"network\":%s,"
+        "\"controller\":%s,\"linkOk\":%s,\"heartbeatAgeMs\":%lu,\"commissioned\":%s,"
+        "\"lidarHealthy\":%s,\"drive\":%d,\"turn\":%d,\"coverage\":%u,\"scanAgeMs\":%lu,"
+        "\"scanSequence\":%lu,",
+        SEEKER_BOT_VERSION, robot_mode_name(s.mode), s.reason, json_bool(s.network),
+        json_bool(s.controller), json_bool(s.link_ok), (unsigned long)s.heartbeat_age_ms,
+        json_bool(s.commissioned), json_bool(s.lidar_healthy), s.drive, s.turn,
+        (unsigned)s.coverage, (unsigned long)s.scan_age_ms, (unsigned long)s.scan_sequence);
+    put(&w, "\"frontMm\":%u,\"rearMm\":%u,\"leftMm\":%u,\"rightMm\":%u,\"nearestMm\":%u,"
+        "\"frontKnown\":%s,\"rearKnown\":%s,\"rotationKnown\":%s,",
+        (unsigned)s.view.front_mm, (unsigned)s.view.rear_mm, (unsigned)s.view.left_mm,
+        (unsigned)s.view.right_mm, (unsigned)s.view.nearest_mm, json_bool(s.view.front_known),
+        json_bool(s.view.rear_known), json_bool(s.view.rotation_known));
+    put(&w, "\"autoPhase\":\"%s\",\"autoTrigger\":\"%s\",\"escapeAttempts\":%u,"
+        "\"navHeading\":%d,\"navCenterMm\":%u,\"autoRemainingS\":%lu,",
+        s.auto_phase, s.auto_trigger ? s.auto_trigger : "none", s.escape_attempts, s.nav_heading,
+        (unsigned)s.view.free_mm[NAV_CENTER], (unsigned long)s.auto_remaining_s);
+    put(&w, "\"packets\":%lu,\"lidarRxBytes\":%lu,\"lidarHeaders\":%lu,\"lidarRejected\":%lu,"
+        "\"lidarRxPin\":%d,\"lidarBaud\":%d,\"lidarRawSample\":\"%s\",\"lidarDiagnostic\":\"%s\","
+        "\"crcErrors\":%lu,",
+        (unsigned long)stats.packets, (unsigned long)stats.rx_bytes, (unsigned long)stats.headers,
+        (unsigned long)stats.rejected_packets, SEEKER_PIN_LIDAR_RX, SEEKER_LIDAR_BAUDRATE,
+        sample, diagnostic, (unsigned long)stats.crc_errors);
+    put(&w, "\"heap\":%lu,\"minHeap\":%lu,\"uptime\":%lld,\"resetReason\":%d,\"resetReasonText\":\"%s\",",
+        (unsigned long)esp_get_free_heap_size(), (unsigned long)esp_get_minimum_free_heap_size(),
+        (long long)(esp_timer_get_time() / 1000000), (int)esp_reset_reason(),
+        seeker_reset_name(esp_reset_reason()));
     wifi_ap_record_t ap;
-    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK)
-        cJSON_AddNumberToObject(j, "wifiRssi", ap.rssi);
-    cJSON_AddNumberToObject(j, "manualLimit", SEEKER_MANUAL_MAX_PERCENT);
-    return json_reply(req, j);
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) put(&w, "\"wifiRssi\":%d,", ap.rssi);
+    put(&w, "\"manualLimit\":%d,\"lidarFrontDeg\":%d,\"settings\":{",
+        SEEKER_MANUAL_MAX_PERCENT, SEEKER_LIDAR_FRONT_DEG);
+    for (unsigned i = 0; i < SETTINGS_COUNT; i++)
+        put(&w, "%s\"%s\":%d", i ? "," : "", SETTINGS_FIELDS[i].name,
+            *(const int *)((const char *)&s.settings + SETTINGS_FIELDS[i].offset));
+    put(&w, "}");
+    /* One bounded request carries radar + state, also during movement.
+       Keep the lightweight status endpoint for diagnostics/other clients. */
+    if (!strcmp(req->uri, "/api/telemetry")) {
+        put(&w, ",\"scan\":");
+        scan_json(&w);
+    }
+    put(&w, "}");
+    return json_reply(req, &w);
 }
 
 static esp_err_t scan_handler(httpd_req_t *req)
 {
-    ld20_scan_t scan = {0};
-    bool fresh = ld20_lidar_get_scan(&scan, 0) == ESP_OK;
-    cJSON *j = cJSON_CreateObject();
-    if (!j) return json_reply(req, NULL);
-    cJSON_AddBoolToObject(j, "fresh", fresh);
-    cJSON_AddNumberToObject(j, "rpm", scan.speed_rpm);
-    cJSON_AddNumberToObject(j, "sequence", scan.sequence);
-    cJSON *points = cJSON_AddArrayToObject(j, "distance");
-    if (!points) { cJSON_Delete(j); return json_reply(req, NULL); }
-    for (int i = 0; i < 360; i++) {
-        int raw = (SEEKER_LIDAR_FRONT_DEG + (SEEKER_LIDAR_CLOCKWISE ? i : -i) + 720) % 360;
-        if (!cJSON_AddItemToArray(points, cJSON_CreateNumber(scan.distance_mm[raw]))) {
-            cJSON_Delete(j); return json_reply(req, NULL);
-        }
-    }
-    return json_reply(req, j);
+    writer_t w = {0};
+    scan_json(&w);
+    return json_reply(req, &w);
 }
 
 static bool uint_field(cJSON *j, const char *name, uint32_t *out)
@@ -168,9 +220,9 @@ static esp_err_t control_handler(httpd_req_t *req)
     if (httpd_req_get_hdr_value_str(req, "Content-Type", type, sizeof(type)) != ESP_OK ||
         strcmp(type, "application/json"))
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "json_required");
-    if (req->content_len <= 0 || req->content_len > 256)
+    if (req->content_len <= 0 || req->content_len > 768)
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid_body_size");
-    char body[257];
+    char body[769];
     unsigned used = 0;
     while (used < req->content_len) {
         int n = httpd_req_recv(req, body + used, req->content_len - used);
@@ -192,23 +244,31 @@ static esp_err_t control_handler(httpd_req_t *req)
                       (uint_field(j, "token", &token) && uint_field(j, "sequence", &seq));
         if (!strcmp(cmd->valuestring, "move"))
             valid = valid && axis_field(j, "drive", &drive) && axis_field(j, "turn", &turn);
-        err = valid ? robot_manager_command(token, seq, cmd->valuestring, drive, turn,
-                     cJSON_IsString(mode) ? mode->valuestring : NULL) : ESP_ERR_INVALID_ARG;
+        if (!strcmp(cmd->valuestring, "settings")) {
+            motion_settings_t settings;
+            for (unsigned i = 0; i < SETTINGS_COUNT; i++) {
+                uint32_t value = 0;
+                valid = uint_field(j, SETTINGS_FIELDS[i].name, &value) && value <= 5000 && valid;
+                *(int *)((char *)&settings + SETTINGS_FIELDS[i].offset) = (int)value;
+            }
+            err = valid ? robot_manager_configure(token, seq, settings) : ESP_ERR_INVALID_ARG;
+        } else {
+            err = valid ? robot_manager_command(token, seq, cmd->valuestring, drive, turn,
+                         cJSON_IsString(mode) ? mode->valuestring : NULL) : ESP_ERR_INVALID_ARG;
+        }
     }
     bool claim = !strcmp(cmd->valuestring, "claim");
     cJSON_Delete(j);
-    if (err != ESP_OK) {
-        httpd_resp_set_status(req, err == ESP_ERR_INVALID_ARG ? "400 Bad Request" : "409 Conflict");
-        cJSON *reply = cJSON_CreateObject();
-        if (reply) { cJSON_AddBoolToObject(reply, "ok", false); cJSON_AddStringToObject(reply, "error", esp_err_to_name(err)); }
-        return json_reply(req, reply);
+    if (err != ESP_OK)
+        return text_reply(req, err == ESP_ERR_INVALID_ARG ? "400 Bad Request" : "409 Conflict",
+            err == ESP_ERR_INVALID_ARG ? "{\"ok\":false,\"error\":\"ESP_ERR_INVALID_ARG\"}"
+                                       : "{\"ok\":false,\"error\":\"ESP_ERR_INVALID_STATE\"}");
+    if (claim) {
+        char reply[48];
+        snprintf(reply, sizeof(reply), "{\"ok\":true,\"token\":%lu}", (unsigned long)token);
+        return text_reply(req, NULL, reply);
     }
-    cJSON *reply = cJSON_CreateObject();
-    if (reply) {
-        cJSON_AddBoolToObject(reply, "ok", true);
-        if (claim) cJSON_AddNumberToObject(reply, "token", token);
-    }
-    return json_reply(req, reply);
+    return text_reply(req, NULL, "{\"ok\":true}");
 }
 
 esp_err_t seeker_web_start(void)
@@ -216,17 +276,19 @@ esp_err_t seeker_web_start(void)
     if (s_server) return ESP_OK;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
-    config.max_open_sockets = 4;
+    config.max_open_sockets = 6;
     config.lru_purge_enable = true;
     config.open_fn = socket_open;
     config.recv_wait_timeout = 1;
-    /* Network delivery timeout only; motor deadman remains 350 ms. */
-    config.send_wait_timeout = 5;
+    /* The server is single-threaded: a stalled send must not block the
+       heartbeats of the controller for long. Motor deadman stays 350 ms. */
+    config.send_wait_timeout = 2;
     esp_err_t err = httpd_start(&s_server, &config);
     if (err != ESP_OK) return err;
     const httpd_uri_t routes[] = {
         { .uri = "/", .method = HTTP_GET, .handler = index_handler },
         { .uri = "/api/status", .method = HTTP_GET, .handler = status_handler },
+        { .uri = "/api/telemetry", .method = HTTP_GET, .handler = status_handler },
         { .uri = "/api/scan", .method = HTTP_GET, .handler = scan_handler },
         { .uri = "/api/control", .method = HTTP_POST, .handler = control_handler },
     };

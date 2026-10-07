@@ -5,7 +5,15 @@ const fs = require('node:fs');
 const state = { mode: 'idle', reason: 'mock_only', controller: false,
   commissioned: false, lidarHealthy: true, drive: 0, turn: 0, coverage: 360,
   scanAgeMs: 25, frontMm: 2000, rearMm: 2500, packets: 1234, crcErrors: 0,
-  heap: 140000, uptime: 60, version: '0.2.0 MOCK', manualLimit: 35 };
+  heap: 140000, uptime: 60, version: '0.2.0 MOCK', manualLimit: 100, lidarFrontDeg: 180 };
+let scanSequence = 0;
+state.settings={manualStopMm:200,manualRotateMm:200,autoStopMm:500,autoRotateMm:550,
+ autoSlowMm:1200,autoDrivePercent:30,autoTurnPercent:30,autoSlowPercent:20,rampMs:1000,
+ reverseMs:800,turnMs:1600,resumeMarginMm:50,robotWidthMm:250,autoLimitS:300};
+function scan() {
+  return {fresh: true, rpm: 600, ageMs: 25, sequence: ++scanSequence,
+    distance: Array.from({length: 360}, (_, a) => 2000 + Math.round(400 * Math.sin(a / 20)))};
+}
 let heartbeat = 0, motion = 0;
 const commands = [];
 const server = http.createServer((req, res) => {
@@ -16,8 +24,8 @@ const server = http.createServer((req, res) => {
   }
   res.setHeader('Content-Type', 'application/json');
   if (req.url === '/api/status') return res.end(JSON.stringify(state));
-  if (req.url === '/api/scan') return res.end(JSON.stringify({fresh: true, rpm: 600,
-    sequence: 1, distance: Array.from({length: 360}, (_, a) => 2000 + Math.round(400 * Math.sin(a / 20)))}));
+  if (req.url === '/api/telemetry') return res.end(JSON.stringify({...state, scan: scan()}));
+  if (req.url === '/api/scan') return res.end(JSON.stringify(scan()));
   if (req.url === '/test/commands') return res.end(JSON.stringify(commands));
   if (req.url !== '/api/control' || req.method !== 'POST') {res.statusCode = 404; return res.end('{}');}
   let body = '';
@@ -46,6 +54,11 @@ const server = http.createServer((req, res) => {
         }
         if (b.command === 'release') state.controller = false;
         if (b.command === 'commission') state.commissioned = true;
+        if (b.command === 'settings') {
+          if(state.mode!=='idle'){res.statusCode=409;return res.end('{}');}
+          for(const name of Object.keys(state.settings))state.settings[name]=b[name];
+          state.commissioned=false;state.reason='settings_updated';
+        }
       }
       res.end(JSON.stringify({ok: true}));
     } catch {res.statusCode = 400; res.end('{}');}
@@ -53,7 +66,7 @@ const server = http.createServer((req, res) => {
 });
 setInterval(() => {
   if (Date.now() - motion > 350) state.drive = state.turn = 0;
-  if (state.controller && Date.now() - heartbeat > 1200) {
+  if (state.controller && Date.now() - heartbeat > 5000) {
     state.controller = false;
     state.drive = state.turn = 0;
     if (!['estop','fault'].includes(state.mode)) state.mode = 'idle';
