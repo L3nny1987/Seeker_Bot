@@ -63,6 +63,18 @@ extern "C" {
 #define SEEKER_LIDAR_BAUDRATE   230400
 
 /* =========================================================================
+ *  MPU6050 (GY-521) - Kreisel/Beschleunigung, I2C
+ *    VCC -> 3V3, GND -> GND, SCL -> GPIO 22, SDA -> GPIO 21
+ *    AD0 offen/GND (0x68), INT unbelegt (FIFO wird gepollt).
+ *  Einbaulage beliebig: die Hochachse wird beim Kalibrieren aus der
+ *  Schwerkraft bestimmt. Nach dem Einschalten ~2 s stillstehen lassen.
+ * ========================================================================= */
+#define SEEKER_PIN_IMU_SDA      GPIO_NUM_21
+#define SEEKER_PIN_IMU_SCL      GPIO_NUM_22
+#define SEEKER_IMU_I2C_PORT     0
+#define SEEKER_IMU_I2C_HZ       400000
+
+/* =========================================================================
  *  PWM (LEDC) Einstellungen fuer den L298N
  * ========================================================================= */
 #define SEEKER_PWM_TIMER        LEDC_TIMER_0
@@ -75,9 +87,20 @@ extern "C" {
 /**
  * Der L298N benoetigt eine Mindest-Duty, damit sich der Motor ueberhaupt
  * dreht (Haftreibung + ca. 2 V Spannungsabfall ueber die H-Bruecke).
+ * Gemessen: Fahrmotor ab 85 %, Drehmotor ab 80 %; unter 90 % braucht der
+ * Fahrmotor beim Anfahren einen Anstoss mit 100 % (Kick).
  */
-#define SEEKER_PWM_MIN_PERCENT  25
-#define SEEKER_PWM_MAX_PERCENT  100
+#define SEEKER_DRIVE_MIN_PERCENT     85
+#define SEEKER_TURN_MIN_PERCENT      80
+#define SEEKER_DRIVE_KICK_MS         1000
+#define SEEKER_TURN_KICK_MS          300
+
+/* Koerper relativ zur LIDAR-Mitte (LIDAR auf der Mittellinie, vorne):
+   10 cm nach vorn, 20 cm nach hinten, je 7 cm zur Seite. Alle Abstaende
+   der Bewegungsparameter gelten ab diesem Koerper (Stossstange). */
+#define SEEKER_BODY_FRONT_MM         100
+#define SEEKER_BODY_REAR_MM          200
+#define SEEKER_BODY_HALF_WIDTH_MM    70
 
 /* Commission with wheels raised. This mounting places raw 180 at the front.
  * No odometry: these are geometric margins, not braking guarantees. */
@@ -89,22 +112,28 @@ extern "C" {
    (z. B. > 8 m oder schwarze Flaechen) werden im Planer als unsicher
    behandelt und nur langsam/kurz befahren. */
 #define SEEKER_AUTO_MIN_SECTORS      180
-#define SEEKER_MANUAL_STOP_MM        100
-#define SEEKER_MANUAL_ROTATE_MM      100
-#define SEEKER_STOP_DISTANCE_MM      200
-#define SEEKER_ROTATE_CLEARANCE_MM   100
-#define SEEKER_SLOW_DISTANCE_MM      400
+#define SEEKER_MANUAL_STOP_MM        60
+#define SEEKER_MANUAL_ROTATE_MM      30
+#define SEEKER_STOP_DISTANCE_MM      100
+#define SEEKER_ROTATE_CLEARANCE_MM   40
+#define SEEKER_SLOW_DISTANCE_MM      300
 #define SEEKER_MANUAL_MAX_PERCENT    100
 #define SEEKER_AUTO_DRIVE_PERCENT    90
 #define SEEKER_AUTO_TURN_PERCENT     100
 #define SEEKER_AUTO_SLOW_PERCENT     85
 #define SEEKER_RAMP_MS               1000
-#define SEEKER_REVERSE_MS            800
+#define SEEKER_REVERSE_MS            500
 #define SEEKER_TURN_MS               1600
 #define SEEKER_RESUME_MARGIN_MM      50
-/* Fahrkorridor-Breite fuer die Auto-Planung (LIDAR-Mitte +/- Breite/2). */
-#define SEEKER_ROBOT_WIDTH_MM        250
+/* Fahrkorridor-Breite fuer die Auto-Planung: Koerper 140 mm + Reserve. */
+#define SEEKER_ROBOT_WIDTH_MM        200
 #define SEEKER_AUTO_LIMIT_S          300
+/* Steering (motor B): own, faster ramp; proportional steering starts at the
+   minimum PWM at which the turn motor actually moves. */
+#define SEEKER_TURN_RAMP_MS          400
+#define SEEKER_STEER_MIN_PERCENT     80
+/* Wall following / Bug2: lateral distance LiDAR centre -> wall. */
+#define SEEKER_WALL_DISTANCE_MM      250
 /* Steuerungs-Lease: ohne Heartbeat stoppt Auto nach LINK_PAUSE sofort und
    setzt nach kurzer WLAN-Stoerung fort; nach CONTROL_TIMEOUT ist die
    Steuerung verloren (IDLE, kein automatischer Neustart). */

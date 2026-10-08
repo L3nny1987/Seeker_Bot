@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
@@ -14,15 +15,54 @@
 static EventGroupHandle_t s_events;
 static const char *TAG = "network";
 #define CONNECTED_BIT BIT0
+#define BACKOFF_MIN_MS   500
+#define BACKOFF_MAX_MS   4000
+#define ATTEMPT_TIMEOUT  (15 * 1000000LL)   /* association must finish */
+#define DHCP_TIMEOUT     (15 * 1000000LL)   /* associated but no IP */
+
+/* Written by the event loop, read by the supervisor task and HTTP. */
+static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
+static bool s_associated, s_connecting;
+static int64_t s_attempt_us, s_assoc_us, s_next_us, s_lost_us, s_connected_us;
+static uint32_t s_backoff_ms = BACKOFF_MIN_MS;
+static network_stats_t s_stats;
 
 static void event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
-    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+    int64_t now = esp_timer_get_time();
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+        taskENTER_CRITICAL(&s_mux);
+        s_next_us = now;                 /* supervisor connects right away */
+        taskEXIT_CRITICAL(&s_mux);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
+        taskENTER_CRITICAL(&s_mux);
+        s_associated = true;
+        s_connecting = false;
+        s_assoc_us = now;
+        taskEXIT_CRITICAL(&s_mux);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        wifi_event_sta_disconnected_t *disconnected = data;
+        bool was_online = xEventGroupGetBits(s_events) & CONNECTED_BIT;
         xEventGroupClearBits(s_events, CONNECTED_BIT);
         robot_manager_network(false);
-        wifi_event_sta_disconnected_t *disconnected = data;
+        taskENTER_CRITICAL(&s_mux);
+        if (was_online) { s_stats.disconnects++; s_lost_us = now; s_backoff_ms = BACKOFF_MIN_MS; }
+        else s_stats.failed_attempts++;
+        if (!s_lost_us) s_lost_us = now;
+        s_stats.last_reason = disconnected->reason;
+        s_associated = false;
+        s_connecting = false;
+        /* Never interrupt an attempt: the next one starts after a short,
+           growing pause instead of a blind fixed-interval connect. */
+        s_next_us = now + s_backoff_ms * 1000LL;
+        s_backoff_ms = s_backoff_ms * 2 > BACKOFF_MAX_MS ? BACKOFF_MAX_MS : s_backoff_ms * 2;
+        taskEXIT_CRITICAL(&s_mux);
         ESP_LOGW(TAG, "WLAN getrennt; reason=%u; Antrieb gestoppt", disconnected->reason);
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_LOST_IP) {
+        xEventGroupClearBits(s_events, CONNECTED_BIT);
+        robot_manager_network(false);
+        ESP_LOGW(TAG, "IP-Adresse verloren");
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *ip = data;
         esp_err_t err = seeker_web_start();
@@ -34,17 +74,67 @@ static void event(void *arg, esp_event_base_t base, int32_t id, void *data)
         }
         robot_manager_network(true);
         xEventGroupSetBits(s_events, CONNECTED_BIT);
+        taskENTER_CRITICAL(&s_mux);
+        s_backoff_ms = BACKOFF_MIN_MS;
+        s_connected_us = now;
+        if (s_lost_us) s_stats.last_outage_ms = (uint32_t)((now - s_lost_us) / 1000);
+        s_lost_us = 0;
+        taskEXIT_CRITICAL(&s_mux);
         ESP_LOGI(TAG, "Dashboard: http://" IPSTR, IP2STR(&ip->ip_info.ip));
     }
 }
 
-static void reconnect_task(void *arg)
+/* Starts attempts and breaks out of stuck states (no event, no DHCP). */
+static void supervisor_task(void *arg)
 {
     (void)arg;
     while (true) {
-        if (!(xEventGroupGetBits(s_events) & CONNECTED_BIT)) esp_wifi_connect();
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        vTaskDelay(pdMS_TO_TICKS(250));
+        int64_t now = esp_timer_get_time();
+        bool online = xEventGroupGetBits(s_events) & CONNECTED_BIT;
+        bool start = false, abort_attempt = false;
+        taskENTER_CRITICAL(&s_mux);
+        if (!s_associated && !s_connecting && s_next_us && now >= s_next_us) {
+            s_connecting = true;
+            s_attempt_us = now;
+            start = true;
+        } else if (s_connecting && now - s_attempt_us > ATTEMPT_TIMEOUT) {
+            s_connecting = false;
+            abort_attempt = true;
+        } else if (s_associated && !online && now - s_assoc_us > DHCP_TIMEOUT) {
+            s_assoc_us = now;
+            abort_attempt = true;
+        }
+        taskEXIT_CRITICAL(&s_mux);
+        if (start && esp_wifi_connect() != ESP_OK) {
+            taskENTER_CRITICAL(&s_mux);
+            s_connecting = false;
+            s_next_us = now + 1000000;
+            taskEXIT_CRITICAL(&s_mux);
+        }
+        if (abort_attempt) {
+            ESP_LOGW(TAG, "WLAN-Verbindung haengt; neuer Versuch");
+            /* Raises STA_DISCONNECTED, which schedules the next attempt. */
+            if (esp_wifi_disconnect() != ESP_OK) {
+                taskENTER_CRITICAL(&s_mux);
+                s_associated = false;
+                s_next_us = now + 1000000;
+                taskEXIT_CRITICAL(&s_mux);
+            }
+        }
     }
+}
+
+network_stats_t seeker_network_stats(void)
+{
+    network_stats_t stats;
+    taskENTER_CRITICAL(&s_mux);
+    stats = s_stats;
+    int64_t since = s_connected_us;
+    taskEXIT_CRITICAL(&s_mux);
+    bool online = s_events && (xEventGroupGetBits(s_events) & CONNECTED_BIT);
+    stats.connected_s = online ? (uint32_t)((esp_timer_get_time() - since) / 1000000) : 0;
+    return stats;
 }
 
 esp_err_t seeker_network_init(void)
@@ -67,15 +157,22 @@ esp_err_t seeker_network_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, event, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, event, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_LOST_IP, event, NULL));
     wifi_config_t config = {0};
     memcpy(config.sta.ssid, _WIFI_SSID, strlen(_WIFI_SSID));
     memcpy(config.sta.password, _WIFI_PASS, strlen(_WIFI_PASS));
     config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     config.sta.pmf_cfg.capable = true;
+    /* Mesh/repeater: always pick the strongest access point. */
+    config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    config.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &config));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
-    return xTaskCreate(reconnect_task, "wifi_reconnect", 3072, NULL, 3, NULL) == pdPASS
+    /* 13 dBm instead of 20 dBm: much lower TX current peaks (brownouts on
+       weak supplies); plenty for an indoor robot near the access point. */
+    ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(52));
+    return xTaskCreate(supervisor_task, "wifi_supervisor", 3072, NULL, 3, NULL) == pdPASS
            ? ESP_OK : ESP_ERR_NO_MEM;
 }

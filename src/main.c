@@ -14,6 +14,8 @@
 #include "seeker_pins.h"
 #include "track_drive.h"
 #include "robot_manager.h"
+#include "mapper.h"
+#include "imu.h"
 #include "network.h"
 #include "reset_diagnostics.h"
 
@@ -35,6 +37,10 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(err);
 
+    /* Optional: without an MPU6050 the SLAM runs on LiDAR alone. */
+    err = imu_init();
+    if (err != ESP_OK) ESP_LOGW(TAG, "IMU nicht verfuegbar: %s", esp_err_to_name(err));
+    ESP_ERROR_CHECK(mapper_init());
     ESP_ERROR_CHECK(robot_manager_init());
     ESP_ERROR_CHECK(seeker_network_init());
     ESP_LOGI(TAG, "Bereit. Antrieb aus; WLAN-Verbindung wird aufgebaut.");

@@ -20,6 +20,9 @@ idf_component_register(
     SRCS
         "main.c"
         "navigation.c"
+        "slam.c"
+        "imu.c"
+        "mapper.c"
         "robot_manager.c"
         "network.c"
         "web_server.c"
@@ -31,6 +34,7 @@ idf_component_register(
         track_drive
         ld20_lidar
         esp_timer
+        esp_driver_i2c
         esp_wifi
         esp_netif
         esp_event

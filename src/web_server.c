@@ -17,12 +17,14 @@
 #include "lwip/tcp.h"
 #include "esp_wifi.h"
 #include "reset_diagnostics.h"
+#include "imu.h"
+#include "network.h"
 
 static httpd_handle_t s_server;
 
 /* The HTTP server runs all handlers on one task, so a single static buffer
    is safe and avoids hundreds of heap allocations per telemetry frame. */
-static char s_json[6144];
+static char s_json[7168];
 typedef struct { size_t used; bool overflow; } writer_t;
 
 static void put(writer_t *w, const char *format, ...)
@@ -53,6 +55,13 @@ static const struct { const char *name; size_t offset; } SETTINGS_FIELDS[] = {
     {"resumeMarginMm", offsetof(motion_settings_t, resume_margin_mm)},
     {"robotWidthMm", offsetof(motion_settings_t, robot_width_mm)},
     {"autoLimitS", offsetof(motion_settings_t, auto_limit_s)},
+    {"turnRampMs", offsetof(motion_settings_t, turn_ramp_ms)},
+    {"steerMinPercent", offsetof(motion_settings_t, steer_min_percent)},
+    {"wallDistanceMm", offsetof(motion_settings_t, wall_distance_mm)},
+    {"driveMinPercent", offsetof(motion_settings_t, drive_min_percent)},
+    {"turnMinPercent", offsetof(motion_settings_t, turn_min_percent)},
+    {"driveKickMs", offsetof(motion_settings_t, drive_kick_ms)},
+    {"turnKickMs", offsetof(motion_settings_t, turn_kick_ms)},
 };
 #define SETTINGS_COUNT (sizeof(SETTINGS_FIELDS) / sizeof(SETTINGS_FIELDS[0]))
 
@@ -151,6 +160,28 @@ static esp_err_t status_handler(httpd_req_t *req)
         "\"navHeading\":%d,\"navCenterMm\":%u,\"autoRemainingS\":%lu,",
         s.auto_phase, s.auto_trigger ? s.auto_trigger : "none", s.escape_attempts, s.nav_heading,
         (unsigned)s.view.free_mm[NAV_CENTER], (unsigned long)s.auto_remaining_s);
+    put(&w, "\"clearRearMm\":%u,\"swingMm\":%u,\"tightFrontMm\":%u,\"tightRearMm\":%u,"
+        "\"bodyFrontMm\":%d,\"bodyRearMm\":%d,\"bodyHalfWidthMm\":%d,",
+        (unsigned)s.view.rear_free_mm, (unsigned)s.view.swing_mm, (unsigned)s.view.tight_front_mm,
+        (unsigned)s.view.tight_rear_mm, SEEKER_BODY_FRONT_MM, SEEKER_BODY_REAR_MM,
+        SEEKER_BODY_HALF_WIDTH_MM);
+    put(&w, "\"exploreTarget\":%s,\"exploreFrontier\":%s,\"exploreX\":%.0f,\"exploreY\":%.0f,"
+        "\"exploreWayX\":%.0f,\"exploreWayY\":%.0f,\"exploreAvoided\":%u,\"exploreSteps\":%u,",
+        json_bool(s.map.target.valid), json_bool(s.map.target.frontier), s.map.target.x,
+        s.map.target.y, s.map.target.way_x, s.map.target.way_y, (unsigned)s.map.avoided,
+        (unsigned)s.map.target.steps);
+    put(&w, "\"strategy\":\"%s\",\"navDetail\":\"%s\",\"goalSet\":%s,\"goalX\":%.0f,\"goalY\":%.0f,"
+        "\"wallLeftMm\":%u,\"wallLeftDeg\":%d,\"wallRightMm\":%u,\"wallRightDeg\":%d,",
+        s.strategy, s.nav_detail, json_bool(s.goal_set), s.goal_x, s.goal_y,
+        s.view.wall_left.valid ? (unsigned)s.view.wall_left.distance_mm : 0u, s.view.wall_left.angle_deg,
+        s.view.wall_right.valid ? (unsigned)s.view.wall_right.distance_mm : 0u, s.view.wall_right.angle_deg);
+    put(&w, "\"poseValid\":%s,\"slamLost\":%s,\"poseX\":%.0f,\"poseY\":%.0f,\"poseDeg\":%.1f,"
+        "\"slamQuality\":%.2f,\"slamScans\":%lu,\"slamIntegrated\":%lu,\"slamRejected\":%lu,"
+        "\"slamUpdateMs\":%lu,\"mapAreaM2\":%.1f,\"pathPoints\":%u,",
+        json_bool(s.map.valid), json_bool(s.map.lost), s.map.x, s.map.y, s.map.theta * 57.29578f,
+        s.map.quality, (unsigned long)s.map.scans, (unsigned long)s.map.integrated,
+        (unsigned long)s.map.rejected, (unsigned long)s.map.update_ms,
+        s.map.known_cells * (SLAM_RES_MM * SLAM_RES_MM / 1e6f), (unsigned)s.map.path_count);
     put(&w, "\"packets\":%lu,\"lidarRxBytes\":%lu,\"lidarHeaders\":%lu,\"lidarRejected\":%lu,"
         "\"lidarRxPin\":%d,\"lidarBaud\":%d,\"lidarRawSample\":\"%s\",\"lidarDiagnostic\":\"%s\","
         "\"crcErrors\":%lu,",
@@ -163,6 +194,23 @@ static esp_err_t status_handler(httpd_req_t *req)
         seeker_reset_name(esp_reset_reason()));
     wifi_ap_record_t ap;
     if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) put(&w, "\"wifiRssi\":%d,", ap.rssi);
+    network_stats_t net = seeker_network_stats();
+    size_t clients = CONFIG_LWIP_MAX_SOCKETS;
+    int fds[CONFIG_LWIP_MAX_SOCKETS];
+    if (httpd_get_client_list(s_server, &clients, fds) != ESP_OK) clients = 0;
+    put(&w, "\"wifiDisconnects\":%lu,\"wifiFailedAttempts\":%lu,\"wifiLastReason\":%u,"
+        "\"wifiConnectedS\":%lu,\"wifiLastOutageMs\":%lu,\"httpClients\":%u,",
+        (unsigned long)net.disconnects, (unsigned long)net.failed_attempts, net.last_reason,
+        (unsigned long)net.connected_s, (unsigned long)net.last_outage_ms, (unsigned)clients);
+    imu_status_t imu = imu_status();
+    put(&w, "\"imuPresent\":%s,\"imuReady\":%s,\"imuCalibrating\":%s,\"imuAddress\":%u,"
+        "\"imuRateDps\":%.1f,\"imuBiasDps\":%.2f,\"imuYawDeg\":%.1f,\"imuTiltDeg\":%.1f,"
+        "\"imuShockG\":%.2f,\"imuHz\":%.0f,\"imuErrors\":%lu,\"imuOverflows\":%lu,"
+        "\"slamImu\":%s,\"headingSigmaDeg\":%.2f,\"gyroBiasDps\":%.3f,",
+        json_bool(imu.present), json_bool(imu.ready), json_bool(imu.calibrating), imu.address,
+        imu.rate_dps, imu.bias_dps, imu.yaw_deg, imu.tilt_deg, imu.shock_g, imu.sample_hz,
+        (unsigned long)imu.errors, (unsigned long)imu.overflows, json_bool(s.map.imu),
+        s.map.heading_sigma * 57.29578f, s.map.gyro_bias * 57.29578f);
     put(&w, "\"manualLimit\":%d,\"lidarFrontDeg\":%d,\"settings\":{",
         SEEKER_MANUAL_MAX_PERCENT, SEEKER_LIDAR_FRONT_DEG);
     for (unsigned i = 0; i < SETTINGS_COUNT; i++)
@@ -184,6 +232,92 @@ static esp_err_t scan_handler(httpd_req_t *req)
     writer_t w = {0};
     scan_json(&w);
     return json_reply(req, &w);
+}
+
+static void put16(uint8_t *p, uint16_t v) { p[0] = v; p[1] = v >> 8; }
+static void put32(uint8_t *p, uint32_t v) { put16(p, v); put16(p + 2, v >> 16); }
+static void putf(uint8_t *p, float v) { uint32_t u; memcpy(&u, &v, 4); put32(p, u); }
+
+/* Binary occupancy map, little-endian:
+   40 byte header "SMAP", then SIZE*SIZE 2-bit cells (4 per byte, index
+   gy*SIZE+gx: 0 unknown, 1 free, 2 probably occupied, 3 occupied), then
+   the path as int16 cm (x, y) pairs. Streamed in bounded chunks. */
+static esp_err_t map_handler(httpd_req_t *req)
+{
+    static int16_t path[SLAM_PATH_MAX][2];
+    robot_status_t s = robot_manager_status();
+    uint16_t count = mapper_path(path, SLAM_PATH_MAX);
+    uint8_t chunk[1024] = {0};
+    memcpy(chunk, "SMAP", 4);
+    chunk[4] = 1;
+    chunk[5] = (s.map.valid ? 1 : 0) | (s.map.lost ? 2 : 0) | (s.goal_set ? 4 : 0);
+    put16(chunk + 6, SLAM_SIZE);
+    put16(chunk + 8, SLAM_RES_MM);
+    put16(chunk + 10, count);
+    putf(chunk + 12, s.map.x);
+    putf(chunk + 16, s.map.y);
+    putf(chunk + 20, s.map.theta);
+    putf(chunk + 24, s.goal_x);
+    putf(chunk + 28, s.goal_y);
+    float quality = s.map.quality * 100;
+    chunk[32] = (uint8_t)(quality < 0 ? 0 : quality > 100 ? 100 : quality);
+    chunk[33] = 0;
+    put32(chunk + 36, s.map.integrated);
+    headers(req);
+    httpd_resp_set_type(req, "application/octet-stream");
+    size_t used = 40;
+    const int8_t *grid = mapper_grid();
+    for (unsigned i = 0; i < SLAM_SIZE * SLAM_SIZE; i += 4) {
+        chunk[used++] = slam_cell_class(grid[i]) | slam_cell_class(grid[i + 1]) << 2 |
+                        slam_cell_class(grid[i + 2]) << 4 | slam_cell_class(grid[i + 3]) << 6;
+        if (used == sizeof(chunk)) {
+            esp_err_t err = httpd_resp_send_chunk(req, (const char *)chunk, used);
+            if (err != ESP_OK) return err;
+            used = 0;
+        }
+    }
+    for (uint16_t i = 0; i < count; i++) {
+        put16(chunk + used, (uint16_t)path[i][0]);
+        put16(chunk + used + 2, (uint16_t)path[i][1]);
+        used += 4;
+        if (used == sizeof(chunk)) {
+            esp_err_t err = httpd_resp_send_chunk(req, (const char *)chunk, used);
+            if (err != ESP_OK) return err;
+            used = 0;
+        }
+    }
+    if (used) {
+        esp_err_t err = httpd_resp_send_chunk(req, (const char *)chunk, used);
+        if (err != ESP_OK) return err;
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+static bool coord_field(cJSON *j, const char *name, float *out)
+{
+    cJSON *v = cJSON_GetObjectItemCaseSensitive(j, name);
+    if (!cJSON_IsNumber(v) || !isfinite(v->valuedouble) || v->valuedouble < -10000 ||
+        v->valuedouble > 10000) return false;
+    *out = (float)v->valuedouble;
+    return true;
+}
+
+/* strategy: explore | wall_left | wall_right | goal | path (goalX/goalY mm)
+   | home | path_home. goal/home: Bug2, path/path_home: SLAM map path. */
+static bool strategy_field(cJSON *j, robot_auto_request_t *r)
+{
+    cJSON *v = cJSON_GetObjectItemCaseSensitive(j, "strategy");
+    r->strategy = NAV_STRATEGY_EXPLORE; r->goal_x = 0; r->goal_y = 0;
+    if (!v) return true;
+    if (!cJSON_IsString(v)) return false;
+    if (!strcmp(v->valuestring, "explore")) return true;
+    if (!strcmp(v->valuestring, "wall_left")) { r->strategy = NAV_STRATEGY_WALL_LEFT; return true; }
+    if (!strcmp(v->valuestring, "wall_right")) { r->strategy = NAV_STRATEGY_WALL_RIGHT; return true; }
+    bool path = !strncmp(v->valuestring, "path", 4);
+    r->strategy = path ? NAV_STRATEGY_PATH : NAV_STRATEGY_GOAL;
+    if (!strcmp(v->valuestring, "home") || !strcmp(v->valuestring, "path_home")) return true;
+    return (!strcmp(v->valuestring, "goal") || !strcmp(v->valuestring, "path")) &&
+           coord_field(j, "goalX", &r->goal_x) && coord_field(j, "goalY", &r->goal_y);
 }
 
 static bool uint_field(cJSON *j, const char *name, uint32_t *out)
@@ -253,8 +387,10 @@ static esp_err_t control_handler(httpd_req_t *req)
             }
             err = valid ? robot_manager_configure(token, seq, settings) : ESP_ERR_INVALID_ARG;
         } else {
+            robot_auto_request_t request;
+            valid = strategy_field(j, &request) && valid;
             err = valid ? robot_manager_command(token, seq, cmd->valuestring, drive, turn,
-                         cJSON_IsString(mode) ? mode->valuestring : NULL) : ESP_ERR_INVALID_ARG;
+                         cJSON_IsString(mode) ? mode->valuestring : NULL, &request) : ESP_ERR_INVALID_ARG;
         }
     }
     bool claim = !strcmp(cmd->valuestring, "claim");
@@ -290,6 +426,7 @@ esp_err_t seeker_web_start(void)
         { .uri = "/api/status", .method = HTTP_GET, .handler = status_handler },
         { .uri = "/api/telemetry", .method = HTTP_GET, .handler = status_handler },
         { .uri = "/api/scan", .method = HTTP_GET, .handler = scan_handler },
+        { .uri = "/api/map", .method = HTTP_GET, .handler = map_handler },
         { .uri = "/api/control", .method = HTTP_POST, .handler = control_handler },
     };
     for (unsigned i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {

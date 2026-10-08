@@ -28,7 +28,7 @@ static uint8_t crc8(const uint8_t *p, unsigned len)
     return crc;
 }
 
-static void packet(const uint8_t *p)
+static void packet(const uint8_t *p, int64_t now)
 {
     unsigned start = le16(p + 4), end = le16(p + 42);
     unsigned speed = le16(p + 2); /* degrees/second, NOT RPM */
@@ -39,7 +39,6 @@ static void packet(const uint8_t *p)
         xSemaphoreGive(s_lock);
         return;
     }
-    int64_t now = esp_timer_get_time();
     xSemaphoreTake(s_lock, portMAX_DELAY);
     if (s_last_packet && now - s_last_packet > SEEKER_LIDAR_STALE_MS * 1000LL) {
         memset(&s_work, 0, sizeof(s_work));
@@ -82,7 +81,16 @@ static void receive_task(void *arg)
     uint8_t bytes[256], frame[47];
     unsigned used = 0;
     while (true) {
-        int n = uart_read_bytes(SEEKER_LIDAR_UART_NUM, bytes, sizeof(bytes), pdMS_TO_TICKS(20));
+        /* Wait for the first byte, then take what is buffered: the scan
+           timestamp feeds the gyro fusion, waiting for a full 256-byte block
+           delayed it by up to 15 ms. Each frame is back-dated to its last byte. */
+        int n = uart_read_bytes(SEEKER_LIDAR_UART_NUM, bytes, 1, pdMS_TO_TICKS(20));
+        if (n > 0) {
+            int more = uart_read_bytes(SEEKER_LIDAR_UART_NUM, bytes + 1, sizeof(bytes) - 1, 0);
+            if (more > 0) n += more;
+        }
+        int64_t received = esp_timer_get_time();
+        const int64_t byte_us = 10000000LL / SEEKER_LIDAR_BAUDRATE;
         if (n > 0) {
             xSemaphoreTake(s_lock, portMAX_DELAY);
             s_stats.rx_bytes += n;
@@ -103,7 +111,7 @@ static void receive_task(void *arg)
                 xSemaphoreGive(s_lock);
             }
             if (used != sizeof(frame)) continue;
-            if (crc8(frame, 46) == frame[46]) { packet(frame); used = 0; }
+            if (crc8(frame, 46) == frame[46]) { packet(frame, received - (n - 1 - i) * byte_us); used = 0; }
             else {
                 xSemaphoreTake(s_lock, portMAX_DELAY);
                 s_stats.crc_errors++;

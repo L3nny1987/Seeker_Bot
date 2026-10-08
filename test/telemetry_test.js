@@ -15,7 +15,9 @@ const status = {mode: 'manual', lidarHealthy: true, scan, uptime: 12,
   packets: 100, crcErrors: 0, manualLimit: 100, reason: 'manual'};
 status.settings={manualStopMm:200,manualRotateMm:200,autoStopMm:500,autoRotateMm:550,
   autoSlowMm:1200,autoDrivePercent:30,autoTurnPercent:30,autoSlowPercent:20,rampMs:1000,
-  reverseMs:800,turnMs:1600,resumeMarginMm:50,robotWidthMm:250,autoLimitS:300};
+  reverseMs:800,turnMs:1600,resumeMarginMm:50,robotWidthMm:250,autoLimitS:300,
+  turnRampMs:400,steerMinPercent:20,wallDistanceMm:350,driveMinPercent:85,turnMinPercent:80,
+  driveKickMs:1000,turnKickMs:300};
 function node(id) {
   if (!nodes.has(id)) nodes.set(id, {value: '30', style: {}, children: [],
     classList: {add() {}, remove() {}, toggle() {}}, addEventListener() {},
@@ -46,7 +48,7 @@ vm.runInContext('draw=()=>{}; token=123; online=true; state={mode:"manual"}; axe
   assert.equal(vm.runInContext('scanData.sequence', context), 41);
   assert.equal(vm.runInContext('axes.drive', context), 1, 'Telemetry must not cancel valid movement');
   assert.equal(node('setting-rampMs').value,1000);
-  assert.equal(node('zone-label').textContent,'200 mm Stoppzone');
+  assert.equal(node('zone-label').textContent,'200 mm Stoppzone ab Körper');
   assert.equal(node('save-settings').disabled,true,'Settings prohibited during manual movement');
   assert.ok(timers.some(t => t.ms === 200), 'Target telemetry period is 200 ms');
   await vm.runInContext('pump()', context);
@@ -67,6 +69,10 @@ vm.runInContext('draw=()=>{}; token=123; online=true; state={mode:"manual"}; axe
   assert.equal(settings.rampMs,1000);
   assert.equal(settings.robotWidthMm,250);
   assert.equal(settings.autoLimitS,300);
+  assert.equal(settings.turnRampMs,400);
+  assert.equal(settings.wallDistanceMm,350);
+  assert.equal(settings.driveMinPercent,85);
+  assert.equal(settings.turnKickMs,300);
   assert.ok(requests.at(-1).options.body.length<=768);
   failure = true;
   vm.runInContext('state={mode:"auto"};',context);

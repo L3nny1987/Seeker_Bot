@@ -17,6 +17,12 @@
 /* A short LiDAR dropout (e.g. motor inrush on a shared 5 V rail) pauses
    auto; only a persistent loss is a fault. */
 #define LIDAR_FAULT_MS 2000
+/* Wiggle pulses are short: a full 1 s kick would overshoot them. */
+#define TIGHT_KICK_MS 250
+
+static const navigation_body_t BODY = {
+    SEEKER_BODY_FRONT_MM, SEEKER_BODY_REAR_MM, SEEKER_BODY_HALF_WIDTH_MM
+};
 
 static const char *TAG = "robot_manager";
 static SemaphoreHandle_t s_lock;
@@ -36,13 +42,21 @@ static robot_status_t s_status = {
         .turn_ms = SEEKER_TURN_MS,
         .resume_margin_mm = SEEKER_RESUME_MARGIN_MM,
         .robot_width_mm = SEEKER_ROBOT_WIDTH_MM,
-        .auto_limit_s = SEEKER_AUTO_LIMIT_S
+        .auto_limit_s = SEEKER_AUTO_LIMIT_S,
+        .turn_ramp_ms = SEEKER_TURN_RAMP_MS,
+        .steer_min_percent = SEEKER_STEER_MIN_PERCENT,
+        .wall_distance_mm = SEEKER_WALL_DISTANCE_MM,
+        .drive_min_percent = SEEKER_DRIVE_MIN_PERCENT,
+        .turn_min_percent = SEEKER_TURN_MIN_PERCENT,
+        .drive_kick_ms = SEEKER_DRIVE_KICK_MS,
+        .turn_kick_ms = SEEKER_TURN_KICK_MS
     }
 };
 static uint32_t s_token, s_sequence;
 static int64_t s_heartbeat, s_manual_time, s_auto_started, s_lidar_bad_since;
 static int s_requested_drive, s_requested_turn;
 static navigation_auto_t s_navigation;
+static motion_axis_t s_drive_axis, s_turn_axis;
 
 const char *robot_mode_name(robot_mode_t mode)
 {
@@ -56,6 +70,7 @@ static void stop_locked(robot_mode_t mode, const char *reason)
         ESP_LOGW(TAG, "Stop mode=%s reason=%s", robot_mode_name(mode), reason);
     s_requested_drive = s_requested_turn = 0;
     s_status.drive = s_status.turn = 0;
+    s_drive_axis = s_turn_axis = (motion_axis_t){0};
     s_status.mode = mode;
     s_status.reason = reason;
     navigation_auto_reset(&s_navigation);
@@ -71,9 +86,9 @@ static bool lease_valid(int64_t now)
     return s_token && now - s_heartbeat < SEEKER_CONTROL_TIMEOUT_MS * 1000LL;
 }
 
-static int ramp(int current, int target, int *remainder)
+static int axis(motion_axis_t *a, int target, int min_percent, int kick_ms, int ramp_ms)
 {
-    return motion_ramp(current, target, s_status.settings.ramp_ms, SEEKER_MANAGER_PERIOD_MS, remainder);
+    return motion_axis_step(a, target, min_percent, kick_ms, ramp_ms, SEEKER_MANAGER_PERIOD_MS);
 }
 
 static void settings_load(void)
@@ -116,7 +131,6 @@ static void manager_task(void *arg)
     uint32_t previous_sequence = 0, view_sequence = 0;
     int view_width = 0;
     navigation_view_t view = {0};
-    int drive_remainder = 0, turn_remainder = 0;
     while (true) {
         bool fresh = ld20_lidar_get_scan(&scan, 0) == ESP_OK;
         xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -131,10 +145,22 @@ static void manager_task(void *arg)
                 memcpy(previous, scan.distance_mm, sizeof(previous));
                 previous_sequence = scan.sequence;
             }
-            view = navigation_analyze(fused, SEEKER_LIDAR_FRONT_DEG, SEEKER_LIDAR_CLOCKWISE, width);
+            view = navigation_analyze(fused, SEEKER_LIDAR_FRONT_DEG, SEEKER_LIDAR_CLOCKWISE, width, BODY);
+            mapper_explore_bonus(view.explore_bonus);
             view_sequence = scan.sequence;
             view_width = width;
         }
+        /* SLAM pose of the latest matched scan (mapper task, own lock). */
+        mapper_info_t map = mapper_info();
+        view.pose_valid = map.valid;
+        view.pose_x = map.x;
+        view.pose_y = map.y;
+        view.pose_theta = map.theta;
+        view.route_valid = map.valid && map.target.valid;
+        view.route_way_x = map.target.way_x;
+        view.route_way_y = map.target.way_y;
+        view.route_goal_x = map.target.x;
+        view.route_goal_y = map.target.y;
         int64_t now = esp_timer_get_time();
         xSemaphoreTake(s_lock, portMAX_DELAY);
         s_status.view = view;
@@ -154,6 +180,7 @@ static void manager_task(void *arg)
         bool link_ok = s_token && now - s_heartbeat < SEEKER_LINK_PAUSE_MS * 1000LL;
         s_status.link_ok = link_ok;
         int drive = 0, turn = 0;
+        bool tight = false;
         if (s_status.mode == ROBOT_MANUAL) {
             if (now - s_manual_time > SEEKER_MANUAL_TIMEOUT_MS * 1000LL) {
                 s_requested_drive = s_requested_turn = 0;
@@ -162,14 +189,17 @@ static void manager_task(void *arg)
             drive = s_requested_drive;
             turn = s_requested_turn;
             /* Manual commissioning is possible without LiDAR. When valid,
-               measured close obstacles block travel toward them. */
-            if (fresh && drive > 0 && view.front_mm && view.front_mm <= s_status.settings.manual_stop_mm) {
+               measured close obstacles block travel toward them. Clearances
+               are measured from the body, not from the LiDAR. */
+            if (fresh && drive > 0 && view.front_mm &&
+                view.free_mm[NAV_CENTER] <= s_status.settings.manual_stop_mm) {
                 drive = 0; s_status.reason = "front_obstacle";
             }
-            if (fresh && drive < 0 && view.rear_mm && view.rear_mm <= s_status.settings.manual_stop_mm) {
+            if (fresh && drive < 0 && view.rear_mm &&
+                view.rear_free_mm <= s_status.settings.manual_stop_mm) {
                 drive = 0; s_status.reason = "rear_obstacle";
             }
-            if (fresh && turn && view.nearest_mm && view.nearest_mm <= s_status.settings.manual_rotate_mm) {
+            if (fresh && turn && view.nearest_mm && view.swing_mm <= s_status.settings.manual_rotate_mm) {
                 turn = 0; s_status.reason = "rotation_obstacle";
             }
         } else if (s_status.mode == ROBOT_AUTO) {
@@ -184,18 +214,29 @@ static void manager_task(void *arg)
             } else {
                 navigation_plan_t p = navigation_auto_step(&s_navigation, &view,
                     s_status.settings, now / 1000, scan.sequence);
-                drive = p.drive; turn = p.turn;
-                s_status.reason = p.reason;
+                if (p.done) stop_locked(ROBOT_IDLE, p.reason);
+                else {
+                    drive = p.drive; turn = p.turn; tight = p.tight;
+                    s_status.reason = p.reason;
+                }
             }
         }
-        int actual_drive = ramp(s_status.drive, drive, &drive_remainder);
-        int actual_turn = ramp(s_status.turn, turn, &turn_remainder);
+        /* Output stage: minimum PWM, start kick, ramps (steering faster). */
+        const motion_settings_t *cfg = &s_status.settings;
+        int drive_kick = cfg->drive_kick_ms, turn_kick = cfg->turn_kick_ms;
+        if (tight && drive_kick > TIGHT_KICK_MS) drive_kick = TIGHT_KICK_MS;
+        if (tight && turn_kick > TIGHT_KICK_MS) turn_kick = TIGHT_KICK_MS;
+        int actual_drive = axis(&s_drive_axis, drive, cfg->drive_min_percent, drive_kick, cfg->ramp_ms);
+        int actual_turn = axis(&s_turn_axis, turn, cfg->turn_min_percent, turn_kick, cfg->turn_ramp_ms);
         if (s_status.mode != ROBOT_ESTOP && s_status.mode != ROBOT_FAULT) {
             if (track_drive_set(actual_drive, actual_turn) != ESP_OK) {
                 track_drive_emergency_stop();
                 stop_locked(ROBOT_FAULT, "motor_fault");
             } else { s_status.drive = actual_drive; s_status.turn = actual_turn; }
         }
+        mapper_set_motion(s_status.drive, s_status.turn);
+        mapper_set_goal(s_status.mode == ROBOT_AUTO && s_navigation.strategy == NAV_STRATEGY_PATH,
+                        s_navigation.goal_x, s_navigation.goal_y);
         xSemaphoreGive(s_lock);
         ESP_ERROR_CHECK(esp_task_wdt_reset());
         vTaskDelayUntil(&wake, pdMS_TO_TICKS(SEEKER_MANAGER_PERIOD_MS));
@@ -248,9 +289,12 @@ esp_err_t robot_manager_claim(uint32_t *token)
 }
 
 esp_err_t robot_manager_command(uint32_t token, uint32_t sequence, const char *cmd,
-                                int drive, int turn, const char *mode)
+                                int drive, int turn, const char *mode,
+                                const robot_auto_request_t *auto_request)
 {
     if (!cmd || !s_lock) return ESP_ERR_INVALID_ARG;
+    /* Read the SLAM state before taking the manager lock (no nesting). */
+    mapper_info_t map = mapper_info();
     xSemaphoreTake(s_lock, portMAX_DELAY);
     int64_t now = esp_timer_get_time();
     esp_err_t err = ESP_OK;
@@ -282,20 +326,31 @@ esp_err_t robot_manager_command(uint32_t token, uint32_t sequence, const char *c
             if (s_status.mode == ROBOT_ESTOP || s_status.mode == ROBOT_FAULT) err = ESP_ERR_INVALID_STATE;
             else if (!strcmp(mode, "manual")) stop_locked(ROBOT_MANUAL, "manual_ready");
             else if (!strcmp(mode, "auto")) {
-                if (!s_status.commissioned || !s_status.lidar_healthy)
+                navigation_strategy_t strategy = auto_request ? auto_request->strategy : NAV_STRATEGY_EXPLORE;
+                /* Goal navigation needs a localized robot. */
+                if (!s_status.commissioned || !s_status.lidar_healthy ||
+                    ((strategy == NAV_STRATEGY_GOAL || strategy == NAV_STRATEGY_PATH) && !map.valid))
                     err = ESP_ERR_INVALID_STATE;
                 else {
-                    ESP_LOGI(TAG, "AUTO start: drive=%d slow=%d turn=%d ramp=%dms stop=%d rotate=%d slowZone=%dmm width=%dmm limit=%ds heap=%lu",
+                    navigation_auto_configure(&s_navigation, strategy,
+                        auto_request ? auto_request->goal_x : 0, auto_request ? auto_request->goal_y : 0);
+                    ESP_LOGI(TAG, "AUTO start: strategy=%s goal=%.0f,%.0f drive=%d slow=%d turn=%d ramp=%d/%dms stop=%d rotate=%d slowZone=%dmm width=%dmm wall=%dmm limit=%ds heap=%lu",
+                        navigation_strategy_name(strategy), s_navigation.goal_x, s_navigation.goal_y,
                         s_status.settings.auto_drive_percent, s_status.settings.auto_slow_percent,
                         s_status.settings.auto_turn_percent, s_status.settings.ramp_ms,
+                        s_status.settings.turn_ramp_ms,
                         s_status.settings.auto_stop_mm, s_status.settings.auto_rotate_mm,
                         s_status.settings.auto_slow_mm, s_status.settings.robot_width_mm,
+                        s_status.settings.wall_distance_mm,
                         s_status.settings.auto_limit_s, (unsigned long)esp_get_free_heap_size());
                     stop_locked(ROBOT_AUTO, "auto_ready");
                     s_auto_started = now;
                 }
             } else if (!strcmp(mode, "idle")) stop_locked(ROBOT_IDLE, "operator_stop");
             else err = ESP_ERR_INVALID_ARG;
+        } else if (!strcmp(cmd, "map_reset")) {
+            if (s_status.mode == ROBOT_AUTO) err = ESP_ERR_INVALID_STATE;
+            else { mapper_request_reset(); s_status.reason = "map_reset"; }
         } else if (!strcmp(cmd, "move")) {
             if (s_status.mode != ROBOT_MANUAL) err = ESP_ERR_INVALID_STATE;
             else if (drive < -SEEKER_MANUAL_MAX_PERCENT || drive > SEEKER_MANUAL_MAX_PERCENT ||
@@ -314,9 +369,17 @@ esp_err_t robot_manager_command(uint32_t token, uint32_t sequence, const char *c
 
 robot_status_t robot_manager_status(void)
 {
+    mapper_info_t map = mapper_info();
     xSemaphoreTake(s_lock, portMAX_DELAY);
     robot_status_t status = s_status;
     int64_t now = esp_timer_get_time();
+    status.map = map;
+    status.strategy = navigation_strategy_name(s_navigation.strategy);
+    status.nav_detail = s_navigation.detail ? s_navigation.detail : "idle";
+    status.goal_set = s_navigation.strategy == NAV_STRATEGY_GOAL ||
+                      s_navigation.strategy == NAV_STRATEGY_PATH;
+    status.goal_x = s_navigation.goal_x;
+    status.goal_y = s_navigation.goal_y;
     status.auto_phase = navigation_phase_name(s_navigation.phase);
     status.auto_trigger = s_navigation.trigger;
     status.nav_heading = s_navigation.heading_deg;
