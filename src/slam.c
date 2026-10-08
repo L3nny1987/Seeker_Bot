@@ -8,9 +8,11 @@
 #define L_MISS           (-5)
 #define L_MAX            100
 #define L_MIN            (-60)
-#define MATCH_MAX_MM     7000
-#define INTEGRATE_MAX_MM 6000
+#define L_INLIER         10         /* occupied evidence for the quality check */
+#define MATCH_MAX_MM     10000
+#define INTEGRATE_MAX_MM 8000
 #define MIN_POINTS       40
+#define MIN_KNOWN        30         /* quality denominator floor */
 #define COARSE_STEP      4          /* every 4th point in the coarse search */
 #define GOOD_QUALITY     0.25f
 #define LOST_AFTER       15
@@ -62,6 +64,8 @@ static void lut(void)
 }
 
 static inline float value(int8_t l) { return s_value[(uint8_t)l]; }
+
+static int cell_of(float w) { return (int)lroundf(w / SLAM_RES_MM) + SLAM_ORIGIN; }
 
 void slam_reset(slam_t *s)
 {
@@ -162,14 +166,32 @@ static slam_pose_t refine(const slam_t *s, slam_pose_t p)
     return p;
 }
 
+/* Fraction of scan points on mapped walls (an occupied cell within one cell),
+   counted only where the map already knows something (3x3 cells around the
+   point). Points in never seen space (far walls, new areas, beyond the grid)
+   are new information, not a mismatch. Far walls are hit by only one beam
+   per cell and stay weak in the log-odds map; a bilinear threshold rejected
+   them. Both made the quality collapse in large rooms until the map stopped
+   updating and the pose was lost. */
 static float inliers(const slam_t *s, slam_pose_t p)
 {
     float c = cosf(p.theta), sn = sinf(p.theta);
-    int hits = 0;
-    for (int i = 0; i < s_n; i++)
-        if (sample(s, p.x + c * s_px[i] - sn * s_py[i], p.y + sn * s_px[i] + c * s_py[i], NULL, NULL) > 0.35f)
-            hits++;
-    return s_n ? (float)hits / s_n : 0;
+    int hits = 0, known = 0;
+    for (int i = 0; i < s_n; i++) {
+        int gx = cell_of(p.x + c * s_px[i] - sn * s_py[i]), gy = cell_of(p.y + sn * s_px[i] + c * s_py[i]);
+        if (gx < 1 || gy < 1 || gx >= SLAM_SIZE - 1 || gy >= SLAM_SIZE - 1) continue;
+        const int8_t *g = &s->grid[gy * SLAM_SIZE + gx];
+        bool seen = false, hit = false;
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++) {
+                int8_t l = g[dy * SLAM_SIZE + dx];
+                seen |= l != 0;
+                hit |= l >= L_INLIER;
+            }
+        known += seen;
+        hits += hit;
+    }
+    return (float)hits / (float)(known > MIN_KNOWN ? known : MIN_KNOWN);
 }
 
 static void update_cell(slam_t *s, int gx, int gy, int delta)
@@ -192,8 +214,6 @@ static void ray(slam_t *s, int x0, int y0, int x1, int y1)
         if (e2 <= dx) { err += dx; y0 += sy; }
     }
 }
-
-static int cell_of(float w) { return (int)lroundf(w / SLAM_RES_MM) + SLAM_ORIGIN; }
 
 static void integrate(slam_t *s, slam_pose_t p)
 {

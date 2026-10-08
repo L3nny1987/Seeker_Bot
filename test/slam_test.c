@@ -10,16 +10,29 @@ static slam_t slam;
 
 /* Room 4.0 x 3.0 m with a box obstacle; ray cast against axis-aligned boxes. */
 typedef struct { double x0, y0, x1, y1; bool inside; } box_t;
-static const box_t boxes[] = {
+static const box_t room[] = {
     {-1500, -1500, 2500, 1500, true},
     {800, 400, 1200, 900, false},
     {-900, -1200, -500, -700, false},
 };
+/* Large hall 16 x 11 m: start 5 m from the back wall, far wall 11 m ahead,
+   a few pillars and a cabinet. */
+static const box_t hall[] = {
+    {-5000, -5500, 11000, 5500, true},
+    {1800, 1800, 2200, 2200, false},
+    {1800, -2200, 2200, -1800, false},
+    {6000, 1800, 6400, 2200, false},
+    {6000, -2200, 6400, -1800, false},
+    {-3000, 4800, -1000, 5500, false},
+};
+static const box_t *boxes = room;
+static unsigned box_count = sizeof(room) / sizeof(room[0]);
+static double max_range = 8000, far_dropout = 0;
 
 static double cast(double x, double y, double dir)
 {
     double c = cos(dir), s = sin(dir), best = 1e9;
-    for (unsigned b = 0; b < sizeof(boxes) / sizeof(boxes[0]); b++) {
+    for (unsigned b = 0; b < box_count; b++) {
         const box_t *q = &boxes[b];
         double xs[2] = {q->x0, q->x1}, ys[2] = {q->y0, q->y1};
         for (int i = 0; i < 2; i++) {
@@ -45,7 +58,9 @@ static void scan(uint16_t raw[360], double x, double y, double th, double vx, do
         double px = x - vx * age, py = y - vy * age, pt = th - w * age;
         double d = cast(px, py, pt - i * PI / 180.0);
         d += ((rand() % 21) - 10);   /* +-10 mm noise */
-        raw[i] = d > 80 && d < 8000 && (i % 17) ? (uint16_t)d : 0;   /* some dropouts */
+        /* Far returns are weak: some drop out beyond 6 m. */
+        bool weak = d > 6000 && rand() % 1000 < far_dropout * 1000;
+        raw[i] = d > 80 && d < max_range && (i % 17) && !weak ? (uint16_t)d : 0;
     }
 }
 
@@ -62,7 +77,7 @@ static int smeared_cells(const slam_t *g)
         for (int gx = 0; gx < SLAM_SIZE; gx++) {
             if (slam_cell_class(g->grid[gy * SLAM_SIZE + gx]) != 3) continue;
             double wx = (gx - SLAM_ORIGIN) * SLAM_RES_MM, wy = (gy - SLAM_ORIGIN) * SLAM_RES_MM, best = 1e9;
-            for (unsigned b = 0; b < sizeof(boxes) / sizeof(boxes[0]); b++) {
+            for (unsigned b = 0; b < box_count; b++) {
                 const box_t *q = &boxes[b];
                 double cx = fmin(fmax(wx, q->x0), q->x1), cy = fmin(fmax(wy, q->y0), q->y1);
                 double d = hypot(wx - cx, wy - cy);
@@ -104,9 +119,55 @@ static void latency_spin_test(void)
     free(g);
 }
 
+/* Large hall with returns up to 12 m (half of them lost beyond 6 m): drive
+   5.5 m ahead, turn, cross the hall, come back. Must never get lost. */
+static void hall_test(void)
+{
+    const double v = 300, w = 1.48, scale = 1.02, bias = 0.004;
+    static const struct { double drive_mm, turn_rad; } legs[] = {
+        {5500, PI / 2}, {3000, PI / 2}, {8000, PI / 2}, {5000, PI / 2}, {4000, 0}};
+    slam_t *g = calloc(1, sizeof(slam_t));
+    uint16_t raw[360];
+    boxes = hall; box_count = sizeof(hall) / sizeof(hall[0]);
+    max_range = 12000; far_dropout = 0.5;
+    slam_reset(g);
+    double x = 0, y = 0, th = 0, yaw = 0, last_yaw = 0, max_err = 0, max_head = 0;
+    uint64_t t = 1000;
+    int lost_scans = 0, scans = 0;
+    for (unsigned leg = 0; leg < sizeof(legs) / sizeof(legs[0]); leg++) {
+        int drive_steps = (int)(legs[leg].drive_mm / (v * 0.1)), turn_steps = (int)(legs[leg].turn_rad / (w * 0.1));
+        for (int i = -10; i < drive_steps + turn_steps; i++) {
+            double vv = i >= 0 && i < drive_steps ? v : 0, ww = i >= drive_steps ? w : 0;
+            th += ww * 0.1;
+            x += vv * cos(th) * 0.1; y += vv * sin(th) * 0.1;
+            yaw += (ww * scale + bias) * 0.1;
+            slam_imu_t imu = {scans > 0, (float)(yaw - last_yaw), (float)(ww * scale + bias)};
+            last_yaw = yaw;
+            scan(raw, x, y, th, vv * cos(th), vv * sin(th), ww);
+            slam_update(g, raw, 0, true, 100, t, vv || ww, &imu);
+            t += 100; scans++;
+            lost_scans += g->lost;
+            double e = hypot(g->pose.x - x, g->pose.y - y), h = angle_error(g->pose.theta, th);
+            if (e > max_err) max_err = e;
+            if (h > max_head) max_head = h;
+        }
+    }
+    printf("hall: scans %d lost %d max err %.0f mm %.1f deg integrated %u q %.2f end %.0f %.0f\n",
+           scans, lost_scans, max_err, max_head * 180 / PI, g->integrated, g->quality, x, y);
+    assert(lost_scans == 0 && max_err < 200 && max_head < 0.05);
+    boxes = room; box_count = sizeof(room) / sizeof(room[0]);
+    max_range = 8000; far_dropout = 0;
+    free(g);
+}
+
+/* Planning-cell indices below are relative to a 192-cell grid (origin at
+   planning cell 24); PO shifts them to the actual grid size. */
+#define PO (SLAM_PLAN_SIZE / 2 - 24)
+
 /* Fill one 20 cm planning cell (4x4 map cells). */
 static void plan_cell(slam_t *g, int cx, int cy, int8_t value)
 {
+    cx += PO; cy += PO;
     for (int j = 0; j < SLAM_PLAN_CELLS; j++)
         for (int i = 0; i < SLAM_PLAN_CELLS; i++)
             g->grid[(cy * SLAM_PLAN_CELLS + j) * SLAM_SIZE + cx * SLAM_PLAN_CELLS + i] = value;
@@ -128,8 +189,8 @@ static void explore_target_tests(void)
 {
     slam_t *g = calloc(1, sizeof(slam_t));
     slam_target_t target;
-    float door_x = (28 * SLAM_PLAN_CELLS + 1.5f - SLAM_ORIGIN) * SLAM_RES_MM;
-    float door_y = (24 * SLAM_PLAN_CELLS + 1.5f - SLAM_ORIGIN) * SLAM_RES_MM;
+    float door_x = ((28 + PO) * SLAM_PLAN_CELLS + 1.5f - SLAM_ORIGIN) * SLAM_RES_MM;
+    float door_y = ((24 + PO) * SLAM_PLAN_CELLS + 1.5f - SLAM_ORIGIN) * SLAM_RES_MM;
     /* Frontier at the door, path length 4 planning cells. */
     plan_room(g);
     assert(slam_explore_target(g, (slam_pose_t){100, 100, 0}, NULL, &target));
@@ -137,7 +198,7 @@ static void explore_target_tests(void)
     assert(fabsf(target.x - door_x) < 1 && fabsf(target.y - door_y) < 1);
     /* Inner wall at x = cell 26 with a gap at the top: path goes around. */
     for (int cy = 19; cy <= 27; cy++) plan_cell(g, 26, cy, 40);
-    float wall_x = (26 * SLAM_PLAN_CELLS - SLAM_ORIGIN) * SLAM_RES_MM;
+    float wall_x = ((26 + PO) * SLAM_PLAN_CELLS - SLAM_ORIGIN) * SLAM_RES_MM;
     assert(slam_explore_target(g, (slam_pose_t){-700, 100, 0}, NULL, &target));
     printf("plan: target %.0f %.0f way %.0f %.0f steps %u\n",
            target.x, target.y, target.way_x, target.way_y, target.steps);
@@ -145,15 +206,15 @@ static void explore_target_tests(void)
     assert(target.way_x < wall_x);
     /* Door blacklisted: no frontier left, revisit coverage instead. */
     static uint8_t avoid[SLAM_PLAN_SIZE * SLAM_PLAN_SIZE];
-    avoid[24 * SLAM_PLAN_SIZE + 28] = 1;
+    avoid[(24 + PO) * SLAM_PLAN_SIZE + 28 + PO] = 1;
     assert(slam_explore_target(g, (slam_pose_t){-700, 100, 0}, avoid, &target));
-    assert(target.valid && !target.frontier && target.cell != 24 * SLAM_PLAN_SIZE + 28);
+    assert(target.valid && !target.frontier && target.cell != (24 + PO) * SLAM_PLAN_SIZE + 28 + PO);
     /* Outside the map: no target. */
     assert(!slam_explore_target(g, (slam_pose_t){1e6f, 0, 0}, NULL, &target));
     free(g);
 }
 
-static float plan_center(int c) { return (c * SLAM_PLAN_CELLS + 1.5f - SLAM_ORIGIN) * SLAM_RES_MM; }
+static float plan_center(int c) { return ((c + PO) * SLAM_PLAN_CELLS + 1.5f - SLAM_ORIGIN) * SLAM_RES_MM; }
 
 static void plan_path_tests(void)
 {
@@ -167,7 +228,7 @@ static void plan_path_tests(void)
     /* Inner wall with a gap at the top: waypoint stays on the robot's side
        and leads upwards around the wall. */
     for (int cy = 19; cy <= 27; cy++) plan_cell(g, 26, cy, 40);
-    float wall_x = (26 * SLAM_PLAN_CELLS - SLAM_ORIGIN) * SLAM_RES_MM;
+    float wall_x = ((26 + PO) * SLAM_PLAN_CELLS - SLAM_ORIGIN) * SLAM_RES_MM;
     assert(slam_plan_path(g, start, plan_center(27), plan_center(24), &t));
     printf("path: way %.0f %.0f steps %u\n", t.way_x, t.way_y, t.steps);
     assert(t.valid && !t.frontier && t.steps == 15);
@@ -192,6 +253,7 @@ static void plan_path_tests(void)
 int main(void)
 {
     uint16_t raw[360];
+    setvbuf(stdout, NULL, _IONBF, 0);
     srand(7);
     slam_reset(&slam);
     double x = 0, y = 0, th = 0;
@@ -285,6 +347,7 @@ int main(void)
     explore_target_tests();
     plan_path_tests();
     latency_spin_test();
+    hall_test();
 
     /* Fast spin at 6.5 rad/s (37 deg per scan, beyond the LiDAR-only search
        window) with a gyro that has 3 % scale error and bias. */

@@ -6,7 +6,7 @@
  * World frame: x = initial forward, y = left, theta CCW (rad), units mm.
  * Occupancy grid in int8 log-odds, cell (gx, gy) at index gy * SIZE + gx,
  * world (0, 0) = cell (ORIGIN, ORIGIN). Pure C: host-testable. */
-#define SLAM_SIZE        192
+#define SLAM_SIZE        256                     /* 12.8 x 12.8 m around the start */
 #define SLAM_RES_MM      50
 #define SLAM_ORIGIN      (SLAM_SIZE / 2)
 #define SLAM_VISIT_CELLS 8                       /* 8 cells = 40 cm */
