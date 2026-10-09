@@ -19,6 +19,7 @@ endif()
 idf_component_register(
     SRCS
         "main.c"
+        "diag.c"
         "navigation.c"
         "slam.c"
         "imu.c"

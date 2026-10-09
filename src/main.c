@@ -17,15 +17,13 @@
 #include "mapper.h"
 #include "imu.h"
 #include "network.h"
+#include "diag.h"
 #include "reset_diagnostics.h"
 
 static const char *TAG = "seeker_bot";
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Seeker_Bot v%s startet", SEEKER_BOT_VERSION);
-    ESP_LOGW(TAG, "Reset reason: %s (%d)", seeker_reset_name(esp_reset_reason()), esp_reset_reason());
-
     ESP_ERROR_CHECK(track_drive_init());
     ESP_ERROR_CHECK(ld20_lidar_init());
 
@@ -36,6 +34,9 @@ void app_main(void)
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+    diag_init();
+    ESP_LOGI(TAG, "Seeker_Bot v%s startet", SEEKER_BOT_VERSION);
+    ESP_LOGW(TAG, "Reset reason: %s (%d)", seeker_reset_name(esp_reset_reason()), esp_reset_reason());
 
     /* Optional: without an MPU6050 the SLAM runs on LiDAR alone. */
     err = imu_init();

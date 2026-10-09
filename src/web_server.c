@@ -17,6 +17,7 @@
 #include "lwip/tcp.h"
 #include "esp_wifi.h"
 #include "reset_diagnostics.h"
+#include "diag.h"
 #include "imu.h"
 #include "network.h"
 #include "esp_app_desc.h"
@@ -610,6 +611,37 @@ static esp_err_t record_post_handler(httpd_req_t *req)
     return text_reply(req, NULL, "{\"ok\":true}");
 }
 
+/* Plain-text reset report: counters, last resets, log before the last
+   reset and since this boot. */
+static esp_err_t diag_get_handler(httpd_req_t *req)
+{
+    headers(req);
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    size_t len = diag_summary(s_json, sizeof(s_json));
+    esp_err_t err = httpd_resp_send_chunk(req, s_json, len);
+    const char *previous = diag_previous_log(&len);
+    if (err == ESP_OK) err = httpd_resp_sendstr_chunk(req, "\n--- Log vor dem letzten Neustart ---\n");
+    if (err == ESP_OK && len) err = httpd_resp_send_chunk(req, previous, len);
+    if (err == ESP_OK) err = httpd_resp_sendstr_chunk(req, "\n--- Log seit diesem Start ---\n");
+    len = diag_current_log(s_json, sizeof(s_json));
+    if (err == ESP_OK && len) err = httpd_resp_send_chunk(req, s_json, len);
+    if (err == ESP_OK) err = httpd_resp_send_chunk(req, NULL, 0);
+    return err;
+}
+
+/* POST ?cmd=clear resets the counters and the history. */
+static esp_err_t diag_post_handler(httpd_req_t *req)
+{
+    char query[32], cmd[8];
+    const char *foreign = foreign_request(req);
+    if (foreign) return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, foreign);
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "cmd", cmd, sizeof(cmd)) != ESP_OK || strcmp(cmd, "clear"))
+        return ota_error(req, "400 Bad Request", "cmd_required");
+    diag_clear();
+    return text_reply(req, NULL, "{\"ok\":true}");
+}
+
 /* A freshly updated image proves itself by bringing the web server up. */
 static void confirm_image(void)
 {
@@ -627,7 +659,7 @@ esp_err_t seeker_web_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
     config.max_open_sockets = 6;
-    config.max_uri_handlers = 10;
+    config.max_uri_handlers = 12;
     config.lru_purge_enable = true;
     config.open_fn = socket_open;
     config.recv_wait_timeout = 1;
@@ -646,6 +678,8 @@ esp_err_t seeker_web_start(void)
         { .uri = "/api/ota", .method = HTTP_POST, .handler = ota_handler },
         { .uri = "/api/record", .method = HTTP_GET, .handler = record_get_handler },
         { .uri = "/api/record", .method = HTTP_POST, .handler = record_post_handler },
+        { .uri = "/api/diag", .method = HTTP_GET, .handler = diag_get_handler },
+        { .uri = "/api/diag", .method = HTTP_POST, .handler = diag_post_handler },
     };
     for (unsigned i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
         err = httpd_register_uri_handler(s_server, &routes[i]);

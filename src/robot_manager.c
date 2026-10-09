@@ -1,4 +1,5 @@
 #include "robot_manager.h"
+#include "diag.h"
 #include "ld20_lidar.h"
 #include "track_drive.h"
 #include "seeker_pins.h"
@@ -237,6 +238,7 @@ static void manager_task(void *arg)
             } else { s_status.drive = actual_drive; s_status.turn = actual_turn; }
         }
         mapper_set_motion(s_status.drive, s_status.turn);
+        diag_snapshot(s_status.mode, s_status.drive, s_status.turn, s_status.network);
         mapper_set_goal(s_status.mode == ROBOT_AUTO && s_navigation.strategy == NAV_STRATEGY_PATH,
                         s_navigation.goal_x, s_navigation.goal_y);
         xSemaphoreGive(s_lock);
