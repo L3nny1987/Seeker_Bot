@@ -19,12 +19,37 @@
 #include "reset_diagnostics.h"
 #include "imu.h"
 #include "network.h"
+#include "esp_app_desc.h"
+#include "esp_app_format.h"
+#include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
+#define OTA_CHUNK    4096
+#define OTA_RETRIES  4                  /* recv timeouts (1 s each) per block */
+#define OTA_IDLE_US  (30 * 1000000LL)   /* upload session expiry */
+
+static const char *TAG = "web";
 static httpd_handle_t s_server;
 
 /* The HTTP server runs all handlers on one task, so a single static buffer
    is safe and avoids hundreds of heap allocations per telemetry frame. */
 static char s_json[7168];
+/* Resumable firmware upload; while it runs, control commands except estop
+   are refused. A session expires after OTA_IDLE_US without blocks. */
+static struct {
+    esp_ota_handle_t handle;
+    const esp_partition_t *slot;
+    size_t total, written;
+    int64_t last_us;
+    bool begun, finished;
+} s_ota;
+
+static bool ota_running(void)
+{
+    return s_ota.finished || (s_ota.begun && esp_timer_get_time() - s_ota.last_us < OTA_IDLE_US);
+}
 typedef struct { size_t used; bool overflow; } writer_t;
 
 static void put(writer_t *w, const char *format, ...)
@@ -338,19 +363,27 @@ static bool axis_field(cJSON *j, const char *name, int *out)
     return true;
 }
 
-static esp_err_t control_handler(httpd_req_t *req)
+/* Same-origin request with the custom header prevents browser CSRF.
+   Returns the rejection reason or NULL. */
+static const char *foreign_request(httpd_req_t *req)
 {
-    /* Same-origin JSON + custom header prevents browser CSRF. A controller
-       lease arbitrates clients; it is NOT authentication against LAN peers. */
-    char origin[128], host[96], expected[128], marker[8], type[64];
+    char origin[128], host[96], expected[128], marker[8];
     if (httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) != ESP_OK ||
         httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK ||
         httpd_req_get_hdr_value_str(req, "X-Seeker-Control", marker, sizeof(marker)) != ESP_OK ||
         strcmp(marker, "1"))
-        return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "same_origin_required");
+        return "same_origin_required";
     snprintf(expected, sizeof(expected), "http://%s", host);
-    if (strcmp(origin, expected))
-        return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "origin_rejected");
+    return strcmp(origin, expected) ? "origin_rejected" : NULL;
+}
+
+static esp_err_t control_handler(httpd_req_t *req)
+{
+    /* A controller lease arbitrates clients; it is NOT authentication
+       against LAN peers. */
+    char type[64];
+    const char *foreign = foreign_request(req);
+    if (foreign) return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, foreign);
     if (httpd_req_get_hdr_value_str(req, "Content-Type", type, sizeof(type)) != ESP_OK ||
         strcmp(type, "application/json"))
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "json_required");
@@ -368,6 +401,10 @@ static esp_err_t control_handler(httpd_req_t *req)
     if (!cJSON_IsObject(j)) { cJSON_Delete(j); return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid_json"); }
     cJSON *cmd = cJSON_GetObjectItemCaseSensitive(j, "command");
     if (!cJSON_IsString(cmd)) { cJSON_Delete(j); return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "command_required"); }
+    if (ota_running() && strcmp(cmd->valuestring, "estop")) {
+        cJSON_Delete(j);
+        return text_reply(req, "409 Conflict", "{\"ok\":false,\"error\":\"ota_busy\"}");
+    }
     uint32_t token = 0, seq = 0;
     int drive = 0, turn = 0;
     esp_err_t err;
@@ -407,6 +444,138 @@ static esp_err_t control_handler(httpd_req_t *req)
     return text_reply(req, NULL, "{\"ok\":true}");
 }
 
+/* Only images of this project (app descriptor) are accepted. */
+static bool own_image(const uint8_t *data, size_t size)
+{
+    const size_t offset = sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t);
+    esp_app_desc_t desc;
+    if (size < offset + sizeof(desc) || data[0] != ESP_IMAGE_HEADER_MAGIC) return false;
+    memcpy(&desc, data + offset, sizeof(desc));
+    return desc.magic_word == ESP_APP_DESC_MAGIC_WORD &&
+           !strncmp(desc.project_name, esp_app_get_description()->project_name, sizeof(desc.project_name));
+}
+
+static void restart_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(800));      /* let the reply reach the client */
+    esp_restart();
+}
+
+static esp_err_t ota_error(httpd_req_t *req, const char *status, const char *error)
+{
+    char reply[64];
+    snprintf(reply, sizeof(reply), "{\"ok\":false,\"error\":\"%s\"}", error);
+    return text_reply(req, status, reply);
+}
+
+static void ota_drop(const char *why)
+{
+    if (s_ota.begun) esp_ota_abort(s_ota.handle);
+    if (s_ota.begun) ESP_LOGE(TAG, "OTA abgebrochen: %s (%u/%u)", why,
+                              (unsigned)s_ota.written, (unsigned)s_ota.total);
+    s_ota.begun = false;
+    s_ota.written = 0;
+}
+
+static bool query_size(const char *query, const char *key, size_t *out)
+{
+    char value[16], *end;
+    if (httpd_query_key_value(query, key, value, sizeof(value)) != ESP_OK || !value[0]) return false;
+    unsigned long n = strtoul(value, &end, 10);
+    *out = n;
+    return *end == 0;
+}
+
+/* Firmware update (incl. the embedded dashboard), resumable: each request
+   carries one block at ?offset=&total=. A Wi-Fi dropout only costs a retry
+   of that block; a single ~1 MB stream never survived the access point's
+   multi-second outages. The reply always reports the next expected offset,
+   so repeated or lost replies resynchronise the client. The bootloader
+   rolls back if the new image never brings the web server up. */
+static esp_err_t ota_handler(httpd_req_t *req)
+{
+    char type[48], query[64];
+    size_t offset, total, len = req->content_len;
+    const char *foreign = foreign_request(req);
+    if (foreign) return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, foreign);
+    if (httpd_req_get_hdr_value_str(req, "Content-Type", type, sizeof(type)) != ESP_OK ||
+        strcmp(type, "application/octet-stream"))
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "binary_required");
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        !query_size(query, "offset", &offset) || !query_size(query, "total", &total))
+        return ota_error(req, "400 Bad Request", "offset_required");
+    if (len == 0 || len > OTA_CHUNK || offset > total || len > total - offset)
+        return ota_error(req, "400 Bad Request", "invalid_size");
+    if (offset == 0 && !s_ota.finished) {
+        robot_mode_t mode = robot_manager_status().mode;
+        if (mode == ROBOT_MANUAL || mode == ROBOT_AUTO)
+            return ota_error(req, "409 Conflict", "robot_busy");
+        ota_drop("restart");
+        s_ota.slot = esp_ota_get_next_update_partition(NULL);
+        if (!s_ota.slot) return ota_error(req, "500 Internal Server Error", "no_ota_slot");
+        if (total < 1024 || total > s_ota.slot->size) return ota_error(req, "400 Bad Request", "invalid_size");
+        s_ota.total = total;
+    } else if (!ota_running() || total != s_ota.total) {
+        ota_drop("timeout");
+        return ota_error(req, "409 Conflict", "no_session");
+    }
+    /* The server is single-threaded: the JSON buffer is free meanwhile. */
+    uint8_t *buf = (uint8_t *)s_json;
+    size_t fill = 0;
+    int retries = 0;
+    while (fill < len) {
+        int n = httpd_req_recv(req, (char *)buf + fill, len - fill);
+        if (n == HTTPD_SOCK_ERR_TIMEOUT && ++retries <= OTA_RETRIES) continue;
+        if (n <= 0) return ota_error(req, "400 Bad Request", "receive_failed");
+        fill += n;
+    }
+    s_ota.last_us = esp_timer_get_time();
+    if (!s_ota.finished && offset == s_ota.written) {
+        if (offset == 0) {
+            if (!own_image(buf, len)) return ota_error(req, "400 Bad Request", "wrong_image");
+            if (esp_ota_begin(s_ota.slot, OTA_WITH_SEQUENTIAL_WRITES, &s_ota.handle) != ESP_OK)
+                return ota_error(req, "500 Internal Server Error", "begin_failed");
+            s_ota.begun = true;
+            ESP_LOGW(TAG, "OTA: %u Bytes nach %s", (unsigned)total, s_ota.slot->label);
+        }
+        if (esp_ota_write(s_ota.handle, buf, len) != ESP_OK) {
+            ota_drop("write_failed");
+            return ota_error(req, "500 Internal Server Error", "write_failed");
+        }
+        s_ota.written += len;
+        if (s_ota.written == s_ota.total) {
+            s_ota.begun = false;         /* esp_ota_end releases the handle */
+            if (esp_ota_end(s_ota.handle) != ESP_OK) {
+                ota_drop("image_invalid");
+                return ota_error(req, "400 Bad Request", "image_invalid");
+            }
+            if (esp_ota_set_boot_partition(s_ota.slot) != ESP_OK) {
+                ota_drop("set_boot_failed");
+                return ota_error(req, "500 Internal Server Error", "set_boot_failed");
+            }
+            s_ota.finished = true;
+            ESP_LOGW(TAG, "OTA fertig, Neustart");
+            xTaskCreate(restart_task, "ota_restart", 2048, NULL, 5, NULL);
+        }
+    }
+    char reply[64];
+    snprintf(reply, sizeof(reply), "{\"ok\":true,\"written\":%u,\"done\":%s}",
+             (unsigned)s_ota.written, s_ota.finished ? "true" : "false");
+    return text_reply(req, NULL, reply);
+}
+
+/* A freshly updated image proves itself by bringing the web server up. */
+static void confirm_image(void)
+{
+    esp_ota_img_states_t state;
+    if (esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
+        state == ESP_OTA_IMG_PENDING_VERIFY) {
+        esp_ota_mark_app_valid_cancel_rollback();
+        ESP_LOGW(TAG, "Neue Firmware bestaetigt");
+    }
+}
+
 esp_err_t seeker_web_start(void)
 {
     if (s_server) return ESP_OK;
@@ -428,10 +597,12 @@ esp_err_t seeker_web_start(void)
         { .uri = "/api/scan", .method = HTTP_GET, .handler = scan_handler },
         { .uri = "/api/map", .method = HTTP_GET, .handler = map_handler },
         { .uri = "/api/control", .method = HTTP_POST, .handler = control_handler },
+        { .uri = "/api/ota", .method = HTTP_POST, .handler = ota_handler },
     };
     for (unsigned i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
         err = httpd_register_uri_handler(s_server, &routes[i]);
         if (err != ESP_OK) { httpd_stop(s_server); s_server = NULL; return err; }
     }
+    confirm_image();
     return ESP_OK;
 }

@@ -192,7 +192,12 @@ footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-si
 </section>
 <section class="tab-panel" id="tab-system" role="tabpanel" hidden>
 <div class="view-head"><h1>System</h1><div class="sub">Diagnose, Verbindung und Ereignisprotokoll</div></div>
-<div class="narrow"><section class="card"><div class="card-head"><h3>Systemdiagnose</h3><span class="pill" id="version">v—</span></div><div class="card-body"><div class="details"><div><span>Scan-Alter</span><strong id="age">—</strong></div><div><span>Freier Heap</span><strong id="heap">—</strong></div><div><span>UART-Pakete</span><strong id="packets">—</strong></div><div><span>CRC-Fehler</span><strong id="crc">—</strong></div><div><span>Laufzeit</span><strong id="uptime">—</strong></div><div><span>Kontrolle</span><strong id="owner">—</strong></div></div><ul class="log" id="log" aria-live="polite"></ul></div></section></div>
+<div class="narrow"><section class="card"><div class="card-head"><h3>Systemdiagnose</h3><span class="pill" id="version">v—</span></div><div class="card-body"><div class="details"><div><span>Scan-Alter</span><strong id="age">—</strong></div><div><span>Freier Heap</span><strong id="heap">—</strong></div><div><span>UART-Pakete</span><strong id="packets">—</strong></div><div><span>CRC-Fehler</span><strong id="crc">—</strong></div><div><span>Laufzeit</span><strong id="uptime">—</strong></div><div><span>Kontrolle</span><strong id="owner">—</strong></div></div><ul class="log" id="log" aria-live="polite"></ul></div></section>
+<section class="card"><div class="card-head"><h3>Firmware-Update (OTA)</h3><span class="pill" id="ota-state">BEREIT</span></div><div class="card-body">
+<p class="small muted">Datei <code>ota/seeker_bot_latest.bin</code> wählen – Firmware und Weboberfläche werden zusammen übertragen. Nur im Leerlauf. Startet die neue Firmware nicht, kehrt der ESP32 automatisch zur vorherigen zurück.</p>
+<div class="row"><input id="ota-file" type="file" accept=".bin,application/octet-stream" aria-label="Firmware-Datei"><button id="ota-send" class="primary" disabled>Hochladen</button></div>
+<progress id="ota-progress" max="100" value="0" style="width:100%;margin-top:12px"></progress>
+</div></section></div>
 </section>
 <footer><span>SEEKER · Lokales WLAN · Keine Cloud</span><span>Software-Stopp ersetzt keinen Hardware-Not-Aus</span></footer>
 </main></div></div>
@@ -293,6 +298,34 @@ $('reset').onclick=()=>{zero();action('reset');};
 $('checked').onchange=refreshControls;
 $('commission').onclick=()=>action('commission');
 $('speed').oninput=()=>{$('speed-label').textContent=$('speed').value;};
+const otaErrors={robot_busy:'Roboter fährt – erst stoppen (Leerlauf).',wrong_image:'Keine Seeker_Bot-Firmware.',image_invalid:'Datei beschädigt oder unvollständig.',invalid_size:'Dateigröße passt nicht.',no_session:'Update-Sitzung abgelaufen – neu starten.',link:'WLAN-Verbindung zu lange unterbrochen.'};
+let otaRunning=false;
+$('ota-file').onchange=()=>{$('ota-send').disabled=!$('ota-file').files.length;$('ota-progress').value=0;$('ota-state').textContent='BEREIT';};
+/* Resumable upload in 4 KB blocks: a Wi-Fi dropout only repeats one block. */
+async function otaBlock(file,offset){
+ const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),10000);
+ try{
+  const res=await fetch(`/api/ota?offset=${offset}&total=${file.size}`,{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Seeker-Control':'1'},body:file.slice(offset,offset+4096),signal:ctrl.signal,cache:'no-store'});
+  let r={};try{r=await res.json();}catch{}
+  return {status:res.status,...r};
+ }catch{return {status:0};}finally{clearTimeout(timer);}
+}
+$('ota-send').onclick=async()=>{
+ const file=$('ota-file').files[0];
+ if(!file||!confirm(`Firmware ${file.name} (${Math.round(file.size/1024)} KB) übertragen? Der Roboter startet danach neu.`))return;
+ $('ota-send').disabled=true;$('ota-state').textContent='ÜBERTRAGE';otaRunning=true;
+ let offset=0,failures=0,error='';
+ while(true){
+  const r=await otaBlock(file,offset);
+  if(r.ok){failures=0;offset=r.written;$('ota-progress').value=Math.round(100*offset/file.size);if(r.done)break;continue;}
+  if(r.status===0||r.error==='receive_failed'){if(++failures<=40){await new Promise(done=>setTimeout(done,500));continue;}error='link';}
+  else error=r.error||String(r.status);
+  break;
+ }
+ otaRunning=false;
+ if(error){$('ota-state').textContent='FEHLER';$('ota-send').disabled=false;log('OTA fehlgeschlagen: '+(otaErrors[error]||error));return;}
+ $('ota-state').textContent='NEUSTART';log(`Firmware übertragen (${offset} Bytes) – Neustart, Seite lädt neu.`);setTimeout(()=>location.reload(),10000);
+};
 $('center').onclick=releaseMotion;
 function joystickMove(e){if(e.pointerId!==pointer)return;const rect=$('joystick').getBoundingClientRect();let x=(e.clientX-rect.left-rect.width/2)/60,y=(e.clientY-rect.top-rect.height/2)/60;const length=Math.hypot(x,y);if(length>1){x/=length;y/=length;}setAxes(-y,x);}
 $('joystick').onpointerdown=e=>{if(!canDrive())return;e.preventDefault();pointer=e.pointerId;$('joystick').setPointerCapture(e.pointerId);joystickMove(e);};
@@ -328,7 +361,7 @@ async function pump(){
 }
 function mm(value){return value?(value/1000).toFixed(2)+' m':'—';}
 async function poll(){
-	if(document.hidden){setTimeout(poll,1000);return;}
+	if(document.hidden||otaRunning){setTimeout(poll,1000);return;}
 	const started=performance.now();
 	try{
 		state=await request('/api/telemetry');
@@ -489,7 +522,7 @@ function drawMap(){
  mapView=renderMap(ctx,mapData,rect.width,rect.height,viewport(mapData,6));
 }
 async function mapLoop(){
- if(!document.hidden&&!mapBusy){
+ if(!document.hidden&&!mapBusy&&!otaRunning){
   mapBusy=true;
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),3000);
   try{

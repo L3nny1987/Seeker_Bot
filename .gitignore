@@ -12,6 +12,7 @@ CMakeFiles/
 *.bin
 *.elf
 *.map
+ota/
 
 # Local Wi-Fi credentials (never commit).
 credentials.h

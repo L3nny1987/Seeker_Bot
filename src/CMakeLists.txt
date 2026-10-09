@@ -41,6 +41,7 @@ idf_component_register(
         esp_http_server
         esp_system
         nvs_flash
+        app_update
         espressif__cjson
 )
 
