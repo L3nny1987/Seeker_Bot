@@ -6,6 +6,7 @@
 
 typedef struct {
     bool valid, lost;
+    bool weak;                   /* young map or failing matches */
     float x, y, theta, quality;
     uint32_t scans, integrated, rejected, update_ms;
     unsigned known_cells;

@@ -161,6 +161,8 @@ static void manager_task(void *arg)
         view.route_way_y = map.target.way_y;
         view.route_goal_x = map.target.x;
         view.route_goal_y = map.target.y;
+        view.map_lost = map.lost;
+        view.map_weak = map.weak;
         int64_t now = esp_timer_get_time();
         xSemaphoreTake(s_lock, portMAX_DELAY);
         s_status.view = view;

@@ -15,6 +15,8 @@
 #define TARGET_CLOSE_MM    600.0f   /* frontier still open when this close: give up */
 #define TARGET_PULL        2500     /* heading bonus toward the waypoint */
 #define TARGET_PULL_DEG    60.0f
+#define WEAK_INTEGRATED    5        /* map younger than this: weak */
+#define WEAK_BAD_MATCHES   2        /* consecutive rejected matches: weak */
 
 static const char *TAG = "mapper";
 static slam_t s_slam;                  /* ~43 KB, written only by the mapper task */
@@ -32,6 +34,9 @@ static void publish(uint32_t update_ms)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_info.valid = s_slam.initialized && !s_slam.lost;
     s_info.lost = s_slam.lost;
+    /* Young map or failing matches: navigation stands still briefly. */
+    s_info.weak = s_slam.initialized && !s_slam.lost &&
+                  (s_slam.integrated < WEAK_INTEGRATED || s_slam.bad_matches >= WEAK_BAD_MATCHES);
     s_info.x = s_slam.pose.x;
     s_info.y = s_slam.pose.y;
     s_info.theta = s_slam.pose.theta;
@@ -61,8 +66,10 @@ static void avoid(uint16_t cell)
             }
 }
 
-/* Frontier exploration: drive toward the nearest reachable unknown space;
-   targets that cannot be reached or resolved are blacklisted. */
+/* Frontier exploration: commit to the nearest reachable unknown space and
+   follow the map path to it until it is reached, explored or given up;
+   re-choosing every update made the robot weave between targets. Targets
+   that cannot be reached or resolved are blacklisted. */
 static void update_target(uint64_t now_ms)
 {
     static slam_target_t current;
@@ -78,22 +85,37 @@ static void update_target(uint64_t now_ms)
     }
     if (current.valid && s_moving) driven_ms += now_ms - last_ms;
     last_ms = now_ms;
-    slam_target_t next;
-    bool ok = slam_explore_target(&s_slam, s_slam.pose, s_avoid, &next);
-    if (ok && current.valid && next.cell == current.cell && driven_ms > TARGET_TIMEOUT_MS) {
+    slam_target_t route;
+    bool keep = current.valid;
+    if (keep && driven_ms > TARGET_TIMEOUT_MS) {
         ESP_LOGI(TAG, "Ziel %.0f/%.0f nicht erreicht: gesperrt", current.x, current.y);
         avoid(current.cell);
-        ok = slam_explore_target(&s_slam, s_slam.pose, s_avoid, &next);
-    } else if (current.valid && current.frontier && (!ok || next.cell != current.cell) &&
-               hypotf(current.x - s_slam.pose.x, current.y - s_slam.pose.y) < TARGET_CLOSE_MM) {
-        /* Reached (or nearly): never return to this spot as a target. */
-        avoid(current.cell);
-        ok = slam_explore_target(&s_slam, s_slam.pose, s_avoid, &next);
+        keep = false;
+    } else if (keep && hypotf(current.x - s_slam.pose.x, current.y - s_slam.pose.y) < TARGET_CLOSE_MM) {
+        /* Reached (or nearly): never return to this frontier as a target. */
+        if (current.frontier) avoid(current.cell);
+        keep = false;
+    } else if (keep && current.frontier && !slam_frontier_open(&s_slam, current.cell)) {
+        keep = false;                    /* explored on the way */
     }
-    if (!ok) next.valid = false;
-    if (!next.valid || !current.valid || next.cell != current.cell) driven_ms = 0;
-    current = next;
-    s_target = next;
+    if (keep && !slam_plan_path(&s_slam, s_slam.pose, current.x, current.y, &route)) {
+        avoid(current.cell);             /* blocked meanwhile */
+        keep = false;
+    }
+    if (!keep) {
+        slam_target_t next;
+        driven_ms = 0;
+        if (!slam_explore_target(&s_slam, s_slam.pose, s_avoid, &next) || !next.valid ||
+            !slam_plan_path(&s_slam, s_slam.pose, next.x, next.y, &route)) {
+            current.valid = false;
+            s_target.valid = false;
+            return;
+        }
+        current = next;
+    }
+    route.frontier = current.frontier;
+    route.cell = current.cell;
+    s_target = route;
 }
 
 /* Gyro yaw at the scan end (LD20 timestamp = end of revolution) and the

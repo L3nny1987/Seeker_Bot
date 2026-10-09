@@ -234,6 +234,17 @@ static unsigned difference(unsigned a, unsigned b)
 #define NAV_MLINE_MM            150.0f
 #define NAV_ROUTE_WAIT_MS       3000    /* no map path that long: unreachable */
 #define NAV_ROUTE_MATCH_MM      400.0f  /* planned goal belongs to this goal */
+/* Route following: rotate in place toward a waypoint far off the nose,
+   then drive straight; small errors are only corrected once they exceed
+   the hold band (no weaving from the minimum steering power). */
+#define NAV_ROUTE_SPIN_DEG      40.0f
+#define NAV_ROUTE_ALIGNED_DEG   8.0f
+#define NAV_COURSE_HOLD_DEG     8.0f
+#define NAV_COURSE_DONE_DEG     3.0f
+/* Weak or lost SLAM: stand still for a while (standing scans re-anchor the
+   pose), then continue anyway and do not pause again for a while. */
+#define NAV_SLAM_WAIT_MS        3000
+#define NAV_SLAM_RETRY_MS       6000
 /* Tight spots: after NAV_MAX_ATTEMPTS normal escapes, short pulses with
    bare-body clearances (reverse, rotate, forward, rotate). */
 #define NAV_WIGGLE_CYCLES       8
@@ -454,10 +465,86 @@ typedef struct {
     bool forward, rear, rotate, uncertain;
 } context_t;
 
+/* Follow the SLAM map waypoint (explore target or go-to-point path):
+   rotate in place when it is far off the nose, otherwise drive straight
+   at it with hysteresis on small corrections. The reactive layer still
+   guards every move; a blocked waypoint corridor falls back to the best
+   free heading (which carries the waypoint pull). */
+static navigation_plan_t follow_route(navigation_auto_t *s, const navigation_view_t *v,
+    const motion_settings_t *cfg, uint64_t now, const context_t *c, bool explore)
+{
+    const char *turn = explore ? "explore_turn" : "path_turn";
+    const char *follow = explore ? "explore_follow" : "path_follow";
+    const char *avoid = explore ? "explore_avoid" : "path_avoid";
+    navigation_plan_t p = {.reason = turn};
+    float dx = v->route_way_x - v->pose_x, dy = v->route_way_y - v->pose_y;
+    float error = -wrap_pi(atan2f(dy, dx) - v->pose_theta) * RAD2DEG;
+    float size = fabsf(error);
+    int side = error > 0 ? 1 : -1;
+    if (size > NAV_ROUTE_SPIN_DEG) s->route_turning = true;
+    else if (size < NAV_ROUTE_ALIGNED_DEG) s->route_turning = false;
+    if (s->route_turning) {
+        s->detail = turn;
+        s->correcting = false;
+        if (!c->rotate)
+            return start_maneuver(s, v, cfg, c->best, c->rotate, c->rear, false, now, turn, side);
+        /* Slower near the target heading: less overshoot. */
+        float magnitude = clampf(size / 60.0f, 0, 1);
+        p.turn = side * (cfg->steer_min_percent +
+            (int)lroundf((cfg->auto_turn_percent - cfg->steer_min_percent) * magnitude));
+        return p;
+    }
+    if (!c->forward) {
+        s->detail = explore ? "explore_blocked" : "path_blocked";
+        s->correcting = false;
+        return start_maneuver(s, v, cfg, c->best, c->rotate, c->rear, false, now, "front_blocked",
+                              c->rotate ? side : 0);
+    }
+    int k = (int)lroundf((error + 90.0f) / NAV_HEADING_STEP_DEG);
+    if (k < 0) k = 0;
+    if (k >= NAV_HEADINGS) k = NAV_HEADINGS - 1;
+    unsigned toward = v->free_mm[k];
+    float way = hypotf(dx, dy);
+    if (toward > c->threshold && (toward + 200.0f >= way || toward > c->threshold + 300)) {
+        s->detail = follow;
+        if (size < (s->correcting ? NAV_COURSE_DONE_DEG : NAV_COURSE_HOLD_DEG)) {
+            s->correcting = false;
+            error = 0;
+        } else s->correcting = true;
+        return steer(cfg, error, toward < c->center ? toward : c->center, c->uncertain, follow);
+    }
+    s->detail = avoid;
+    s->correcting = false;
+    return steer(cfg, s->heading_filtered, c->center, c->uncertain, avoid);
+}
+
+/* Map-based strategies pause while SLAM is weak or lost. */
+static bool slam_pause(navigation_auto_t *s, const navigation_view_t *v, uint64_t now)
+{
+    bool map_mode = s->strategy == NAV_STRATEGY_EXPLORE || s->strategy == NAV_STRATEGY_PATH;
+    if (!map_mode || !(v->map_lost || v->map_weak)) {
+        s->slam_waiting = false;
+        if (s->slam_retry && now - s->slam_wait_ms >= NAV_SLAM_RETRY_MS) s->slam_retry = false;
+        return false;
+    }
+    if (s->slam_retry) {
+        if (now - s->slam_wait_ms < NAV_SLAM_RETRY_MS) return false;
+        s->slam_retry = false;
+    }
+    if (!s->slam_waiting) { s->slam_waiting = true; s->slam_wait_ms = now; }
+    if (now - s->slam_wait_ms < NAV_SLAM_WAIT_MS) return true;
+    s->slam_waiting = false;
+    s->slam_retry = true;
+    s->slam_wait_ms = now;
+    return false;
+}
+
 static navigation_plan_t explore_step(navigation_auto_t *s, const navigation_view_t *v,
     const motion_settings_t *cfg, uint64_t now, const context_t *c)
 {
     s->detail = "explore";
+    if (v->pose_valid && v->route_valid) return follow_route(s, v, cfg, now, c, true);
+    s->route_turning = s->correcting = false;
     if (!c->forward)
         return start_maneuver(s, v, cfg, c->best, c->rotate, c->rear, false, now, "front_blocked", 0);
     float target = s->heading_filtered;
@@ -591,33 +678,7 @@ static navigation_plan_t path_step(navigation_auto_t *s, const navigation_view_t
         return p;
     }
     s->route_missing = false;
-    float dx = v->route_way_x - x, dy = v->route_way_y - y;
-    float error = -wrap_pi(atan2f(dy, dx) - v->pose_theta) * RAD2DEG;
-    int side = error > 0 ? 1 : -1;
-    if (fabsf(error) > NAV_SPIN_DEG) {
-        s->detail = "path_turn";
-        if (!c->rotate)
-            return start_maneuver(s, v, cfg, c->best, c->rotate, c->rear, false, now, "path_turn", side);
-        p.turn = side * cfg->auto_turn_percent;
-        p.reason = "path_turn";
-        return p;
-    }
-    if (!c->forward) {
-        s->detail = "path_blocked";
-        return start_maneuver(s, v, cfg, c->best, c->rotate, c->rear, false, now, "front_blocked",
-                              c->rotate ? side : 0);
-    }
-    int k = (int)lroundf((error + 90.0f) / NAV_HEADING_STEP_DEG);
-    if (k < 0) k = 0;
-    if (k >= NAV_HEADINGS) k = NAV_HEADINGS - 1;
-    unsigned toward = v->free_mm[k];
-    float way = hypotf(dx, dy);
-    if (toward > c->threshold && (toward + 200.0f >= way || toward > c->threshold + 300)) {
-        s->detail = "path_follow";
-        return steer(cfg, error, toward < c->center ? toward : c->center, c->uncertain, "path_follow");
-    }
-    s->detail = "path_avoid";
-    return steer(cfg, s->heading_filtered, c->center, c->uncertain, "path_avoid");
+    return follow_route(s, v, cfg, now, c, false);
 }
 
 navigation_plan_t navigation_auto_step(navigation_auto_t *s, const navigation_view_t *v,
@@ -670,6 +731,13 @@ navigation_plan_t navigation_auto_step(navigation_auto_t *s, const navigation_vi
             s->attempts = s->wiggle_cycles = 0;
         if (stalled(s, v, cfg.ramp_ms, now))
             return start_maneuver(s, v, &cfg, c.best, c.rotate, c.rear, true, now, "stuck_no_progress", 0);
+        if (slam_pause(s, v, now)) {
+            s->detail = "slam_wait";
+            s->driving = false;
+            s->snapshot_valid = false;           /* waiting is not stalling */
+            p.reason = "slam_wait";
+            return p;
+        }
         navigation_plan_t plan;
         if (s->strategy == NAV_STRATEGY_GOAL) plan = goal_step(s, v, &cfg, now, &c);
         else if (s->strategy == NAV_STRATEGY_PATH) plan = path_step(s, v, &cfg, now, &c);

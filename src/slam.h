@@ -45,6 +45,7 @@ typedef struct {
     /* Heading Kalman filter (state: theta, residual gyro bias in rad/s). */
     float kf_p00, kf_p01, kf_p11, gyro_bias;
     bool kf_ready, imu_used;
+    bool was_moving;                             /* motor command of the previous scan */
     unsigned bad_matches, known_cells;
     bool initialized, lost;
     int16_t path[SLAM_PATH_MAX][2];              /* cm, ring buffer */
@@ -68,6 +69,8 @@ void slam_explore_bonus(const slam_t *s, slam_pose_t pose, int16_t out[SLAM_HEAD
    (optional, SLAM_PLAN_SIZE^2, non-zero = skip) holds failed targets.
    Not reentrant (static work buffers). */
 bool slam_explore_target(const slam_t *s, slam_pose_t pose, const uint8_t *avoid, slam_target_t *out);
+/* Planning cell still worth exploring: not blocked and next to unknown space. */
+bool slam_frontier_open(const slam_t *s, uint16_t cell);
 /* Shortest path over the 20 cm planning grid from the pose to the goal:
    known free cells first, unknown cells only if needed (out->frontier).
    out->x/y: goal (moved to an open neighbour cell if the goal cell is

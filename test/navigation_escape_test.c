@@ -30,7 +30,7 @@ static void pose(navigation_view_t *v, float x, float y, float theta)
 
 static void explore_tests(void)
 {
-    navigation_auto_t s;
+    navigation_auto_t s = {0};
     navigation_auto_reset(&s);
     navigation_view_t v = open_view(2000);
     navigation_plan_t p = navigation_auto_step(&s,&v,config,0,1);
@@ -132,7 +132,7 @@ static void explore_tests(void)
 
 static void wiggle_tests(void)
 {
-    navigation_auto_t s;
+    navigation_auto_t s = {0};
     navigation_plan_t p;
     /* Normal clearances exhausted, bare body still has a few cm each way. */
     navigation_view_t v = open_view(190);
@@ -180,7 +180,7 @@ static void wiggle_tests(void)
 
 static void stuck_tests(void)
 {
-    navigation_auto_t s;
+    navigation_auto_t s = {0};
     navigation_plan_t p;
     navigation_view_t v;
     /* Without a pose: distances unchanged while driving -> escape. */
@@ -373,12 +373,25 @@ static void path_tests(void)
     v = open_view(2000); pose(&v, 0, 0, 0); route(&v, 1500, 0, 3000, 0);
     p = navigation_auto_step(&s,&v,config,0,1);
     assert(p.drive==90 && !p.turn && !strcmp(p.reason,"path_follow"));
-    /* Waypoint 45 deg left (detour around a wall): steer left, even though
+    /* Waypoint 30 deg left (detour around a wall): steer left, even though
        the best free heading points elsewhere. */
     v.free_mm[NAV_CENTER+5] = 4000;
-    route(&v, 1000, 1000, 3000, 0);
+    route(&v, 1000, 577, 3000, 0);
     p = navigation_auto_step(&s,&v,config,100,2);
     assert(p.turn < -50 && p.drive > 0 && !strcmp(p.reason,"path_follow"));
+    /* 45 deg: rotate in place first, slower near the target heading, and
+       keep rotating until aligned. */
+    route(&v, 1000, 1000, 3000, 0);
+    p = navigation_auto_step(&s,&v,config,150,3);
+    assert(!p.drive && p.turn==-88 && !strcmp(p.reason,"path_turn"));
+    pose(&v, 0, 0, 0.5f);                         /* 16 deg still to go */
+    p = navigation_auto_step(&s,&v,config,160,4);
+    assert(!p.drive && p.turn==-64 && !strcmp(p.reason,"path_turn"));
+    pose(&v, 0, 0, 0.72f);                        /* aligned: drive */
+    p = navigation_auto_step(&s,&v,config,170,5);
+    assert(p.drive==90 && !p.turn && !strcmp(p.reason,"path_follow"));
+    pose(&v, 0, 0, 0);
+    v.free_mm[NAV_CENTER+5] = 2000;
     /* Waypoint behind: rotate in place toward it. */
     route(&v, -1000, -200, 3000, 0);
     p = navigation_auto_step(&s,&v,config,200,3);
@@ -401,11 +414,82 @@ static void path_tests(void)
     assert(!strcmp(navigation_strategy_name(NAV_STRATEGY_PATH),"path"));
 }
 
+/* Exploration with a map target: rotate toward it, then drive straight;
+   small heading errors are held, larger ones corrected to near zero. */
+static void map_route_tests(void)
+{
+    navigation_auto_t s;
+    navigation_plan_t p;
+    navigation_view_t v;
+    navigation_auto_configure(&s, NAV_STRATEGY_EXPLORE, 0, 0);
+    v = open_view(2000); pose(&v, 0, 0, 0); route(&v, 0, 1500, 3000, 3000);
+    p = navigation_auto_step(&s,&v,config,0,1);
+    assert(!p.drive && p.turn==-100 && !strcmp(p.reason,"explore_turn"));
+    pose(&v, 0, 0, 1.30f);                        /* 15 deg left: keep turning */
+    p = navigation_auto_step(&s,&v,config,100,2);
+    assert(!p.drive && p.turn < 0 && !strcmp(p.reason,"explore_turn"));
+    pose(&v, 0, 0, 1.50f);                        /* aligned */
+    p = navigation_auto_step(&s,&v,config,200,3);
+    assert(p.drive==90 && !p.turn && !strcmp(p.reason,"explore_follow"));
+    pose(&v, 0, 0, 1.45f);                        /* 7 deg: hold course */
+    p = navigation_auto_step(&s,&v,config,300,4);
+    assert(p.drive==90 && !p.turn);
+    pose(&v, 0, 0, 1.38f);                        /* 11 deg: correct */
+    p = navigation_auto_step(&s,&v,config,400,5);
+    assert(p.drive > 85 && p.turn < -50 && !strcmp(p.reason,"explore_follow"));
+    pose(&v, 0, 0, 1.50f);                        /* 4 deg: finish correcting */
+    p = navigation_auto_step(&s,&v,config,500,6);
+    assert(p.turn < 0);
+    pose(&v, 0, 0, 1.56f);
+    p = navigation_auto_step(&s,&v,config,600,7);
+    assert(p.drive==90 && !p.turn);
+    /* Target corridor blocked: avoid via the best heading. */
+    v.free_mm[NAV_CENTER] = 400;
+    p = navigation_auto_step(&s,&v,config,700,8);
+    assert(p.drive > 0 && !strcmp(p.reason,"explore_avoid"));
+    /* No route: reactive exploration. */
+    v = open_view(2000); pose(&v, 0, 0, 0);
+    p = navigation_auto_step(&s,&v,config,800,9);
+    assert(p.drive==90 && !strcmp(p.reason,"cruise"));
+}
+
+/* Weak SLAM pauses map strategies for a while, then they carry on. */
+static void slam_wait_tests(void)
+{
+    navigation_auto_t s;
+    navigation_plan_t p;
+    navigation_view_t v;
+    navigation_auto_configure(&s, NAV_STRATEGY_EXPLORE, 0, 0);
+    v = open_view(2000); v.map_weak = true;
+    p = navigation_auto_step(&s,&v,config,0,1);
+    assert(!p.drive && !p.turn && !strcmp(p.reason,"slam_wait"));
+    p = navigation_auto_step(&s,&v,config,2900,20);
+    assert(!p.drive && !strcmp(p.reason,"slam_wait"));
+    p = navigation_auto_step(&s,&v,config,3000,21);
+    assert(p.drive==90);                          /* gave up waiting */
+    p = navigation_auto_step(&s,&v,config,3100,22);
+    assert(p.drive==90);
+    v.front_mm = 1500;                            /* progress, not stuck */
+    p = navigation_auto_step(&s,&v,config,9100,60);
+    assert(!p.drive && !strcmp(p.reason,"slam_wait"));
+    v.map_weak = false;
+    p = navigation_auto_step(&s,&v,config,9200,61);
+    assert(p.drive==90);
+    v.map_lost = true;                            /* lost counts as weak */
+    p = navigation_auto_step(&s,&v,config,9300,62);
+    assert(!strcmp(p.reason,"slam_wait"));
+    /* Reactive strategies ignore the map. */
+    navigation_auto_configure(&s, NAV_STRATEGY_WALL_RIGHT, 0, 0);
+    v = open_view(2000); v.map_weak = true; v.wall_right = (navigation_wall_t){true, 350, 0};
+    p = navigation_auto_step(&s,&v,config,0,1);
+    assert(p.drive==90 && !strcmp(p.reason,"wall_follow"));
+}
+
 /* Stop threshold hysteresis: cruising keeps going down to auto_stop,
    starting needs auto_stop + resume_margin. */
 static void hysteresis_tests(void)
 {
-    navigation_auto_t s;
+    navigation_auto_t s = {0};
     navigation_plan_t p;
     navigation_view_t v;
     navigation_auto_reset(&s);
@@ -433,7 +517,9 @@ int main(void)
     wall_tests();
     goal_tests();
     path_tests();
+    map_route_tests();
+    slam_wait_tests();
     hysteresis_tests();
-    puts("Planner tests: smooth steering, fast turns, escapes, stuck detection, wall following, Bug2, map path, hysteresis passed.");
+    puts("Planner tests: smooth steering, fast turns, escapes, stuck detection, wall following, Bug2, map path, explore route, SLAM wait, hysteresis passed.");
     return 0;
 }

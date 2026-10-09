@@ -47,6 +47,9 @@ typedef struct {
        sight and the planned goal (may be moved off a wall). */
     bool route_valid;
     float route_way_x, route_way_y, route_goal_x, route_goal_y;
+    /* SLAM health: lost, or weak (young map / failing matches). Map-based
+       strategies pause briefly so the map can lock on standing still. */
+    bool map_lost, map_weak;
 } navigation_view_t;
 
 typedef struct {
@@ -109,6 +112,11 @@ typedef struct {
     /* Map path. */
     bool route_missing;
     uint64_t route_missing_ms;
+    bool route_turning;                 /* rotating in place toward the waypoint */
+    bool correcting;                    /* course correction active (hysteresis) */
+    /* SLAM pause. */
+    bool slam_waiting, slam_retry;
+    uint64_t slam_wait_ms;
 } navigation_auto_t;
 
 void navigation_auto_reset(navigation_auto_t *state);

@@ -6,6 +6,12 @@
 #define DEG2RAD          (PI_F / 180.0f)
 #define L_HIT            20
 #define L_MISS           (-5)
+/* Scans taken while driving carry vibration, track slip and timing errors:
+   they count less than scans taken standing still, which anchor the map. */
+#define L_HIT_MOVING     10
+#define L_MISS_MOVING    (-2)
+#define STILL_EVERY      3          /* standing: integrate every 3rd scan */
+#define MOVING_EVERY     10
 #define L_MAX            100
 #define L_MIN            (-60)
 #define L_INLIER         10         /* occupied evidence for the quality check */
@@ -21,7 +27,7 @@
    while turning still track the pose, but a small heading or LiDAR/gyro
    timing error there smears walls into rings. */
 #define MAP_OMEGA        0.35f      /* rad/s (20 deg/s) */
-#define MAP_QUALITY      0.4f
+#define MAP_QUALITY      0.5f
 /* A failed match must never move the pose far: velocities are bounded and
    decay, implausible jumps are rejected, a lost pose relocalises in a wide
    window around the last good position. */
@@ -94,8 +100,10 @@ static float sample(const slam_t *s, float wx, float wy, float *dx, float *dy)
 
 /* Scan points in the robot frame at the end of the scan (x forward, y left).
    Bins are measured in raw-angle order; the LD20 timestamp marks the end of
-   the revolution, so earlier bins are corrected by the rotation since then. */
-static void build_points(const uint16_t raw[360], int front, bool clockwise, float omega, float period_ms)
+   the revolution, so earlier bins are corrected by the rotation and the
+   travel (robot-frame velocity vfx/vfy, mm/s) since then. */
+static void build_points(const uint16_t raw[360], int front, bool clockwise, float omega, float period_ms,
+                         float vfx, float vfy)
 {
     s_n = 0;
     for (int i = 0; i < 360; i++) {
@@ -104,8 +112,8 @@ static void build_points(const uint16_t raw[360], int front, bool clockwise, flo
         int a = clockwise ? i - front : front - i;          /* robot CW degrees */
         float age = period_ms * 0.001f * (359.5f - i) / 360.0f;
         float alpha = -a * DEG2RAD - omega * age;
-        s_px[s_n] = d * cosf(alpha);
-        s_py[s_n] = d * sinf(alpha);
+        s_px[s_n] = d * cosf(alpha) - vfx * age;
+        s_py[s_n] = d * sinf(alpha) - vfy * age;
         s_n++;
     }
 }
@@ -201,27 +209,29 @@ static void update_cell(slam_t *s, int gx, int gy, int delta)
     *cell = (int8_t)(l > L_MAX ? L_MAX : l < L_MIN ? L_MIN : l);
 }
 
-static void ray(slam_t *s, int x0, int y0, int x1, int y1)
+static void ray(slam_t *s, int x0, int y0, int x1, int y1, int hit, int miss)
 {
     int dx = x1 > x0 ? x1 - x0 : x0 - x1, dy = y1 > y0 ? y0 - y1 : y1 - y0;
     int sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, err = dx + dy;
     for (;;) {
         if (x0 < 0 || y0 < 0 || x0 >= SLAM_SIZE || y0 >= SLAM_SIZE) return;
-        if (x0 == x1 && y0 == y1) { update_cell(s, x0, y0, L_HIT); return; }
-        update_cell(s, x0, y0, L_MISS);
+        if (x0 == x1 && y0 == y1) { update_cell(s, x0, y0, hit); return; }
+        update_cell(s, x0, y0, miss);
         int e2 = 2 * err;
         if (e2 >= dy) { err += dy; x0 += sx; }
         if (e2 <= dx) { err += dx; y0 += sy; }
     }
 }
 
-static void integrate(slam_t *s, slam_pose_t p)
+static void integrate(slam_t *s, slam_pose_t p, bool still)
 {
     float c = cosf(p.theta), sn = sinf(p.theta);
     int x0 = cell_of(p.x), y0 = cell_of(p.y);
+    int hit = still ? L_HIT : L_HIT_MOVING, miss = still ? L_MISS : L_MISS_MOVING;
     for (int i = 0; i < s_n; i++) {
         if (s_px[i] * s_px[i] + s_py[i] * s_py[i] > (float)INTEGRATE_MAX_MM * INTEGRATE_MAX_MM) continue;
-        ray(s, x0, y0, cell_of(p.x + c * s_px[i] - sn * s_py[i]), cell_of(p.y + sn * s_px[i] + c * s_py[i]));
+        ray(s, x0, y0, cell_of(p.x + c * s_px[i] - sn * s_py[i]), cell_of(p.y + sn * s_px[i] + c * s_py[i]),
+            hit, miss);
     }
     s->integrated_pose = p;
     s->since_integrate = 0;
@@ -263,12 +273,17 @@ bool slam_update(slam_t *s, const uint16_t raw[360], int front_deg, bool clockwi
     /* The gyro also sees rotations without a motor command (pushed, slipping). */
     float omega = gyro ? imu->omega - s->gyro_bias : s->omega;
     float previous_rate = s->last_rate;
-    build_points(raw, front_deg, clockwise, omega, period_ms);
+    float ct = cosf(s->pose.theta), st = sinf(s->pose.theta);
+    float vfx = moving ? ct * s->vx + st * s->vy : 0, vfy = moving ? -st * s->vx + ct * s->vy : 0;
+    build_points(raw, front_deg, clockwise, omega, period_ms, vfx, vfy);
     s->last_rate = omega;
+    /* Standing still in this and the previous scan (no coasting). */
+    bool still = !moving && !s->was_moving;
+    s->was_moving = moving;
     if (s_n < MIN_POINTS) { s->rejected++; return false; }
     if (!s->initialized) {
         s->initialized = true;
-        integrate(s, s->pose);
+        integrate(s, s->pose, true);
         track(s, s->pose);
         s->quality = 1;
         return true;
@@ -363,7 +378,9 @@ bool slam_update(slam_t *s, const uint16_t raw[360], int front_deg, bool clockwi
     bool moved = hypotf(p.x - s->integrated_pose.x, p.y - s->integrated_pose.y) > 50.0f ||
                  fabsf(wrap_pi(p.theta - s->integrated_pose.theta)) > 0.05f;
     bool steady = fabsf(omega) < MAP_OMEGA && fabsf(previous_rate) < MAP_OMEGA;
-    if (steady && s->quality >= MAP_QUALITY && (moved || s->since_integrate >= 10)) integrate(s, p);
+    if (steady && s->quality >= MAP_QUALITY &&
+        (moved || s->since_integrate >= (still ? STILL_EVERY : MOVING_EVERY)))
+        integrate(s, p, still);
     return true;
 }
 
@@ -404,20 +421,36 @@ void slam_explore_bonus(const slam_t *s, slam_pose_t pose, int16_t out[SLAM_HEAD
 static uint8_t s_plan[PLAN_N * PLAN_N];
 static uint16_t s_steps[PLAN_N * PLAN_N], s_queue[PLAN_N * PLAN_N];
 
+static uint8_t plan_class(const slam_t *s, int cx, int cy)
+{
+    int free = 0;
+    for (int j = 0; j < SLAM_PLAN_CELLS; j++) {
+        const int8_t *row = &s->grid[(cy * SLAM_PLAN_CELLS + j) * SLAM_SIZE + cx * SLAM_PLAN_CELLS];
+        for (int i = 0; i < SLAM_PLAN_CELLS; i++) {
+            if (row[i] >= SLAM_OCCUPIED) return PLAN_BLOCKED;
+            if (row[i] <= SLAM_FREE) free++;
+        }
+    }
+    return free >= PLAN_MIN_FREE ? PLAN_FREE : PLAN_UNKNOWN;
+}
+
 static void plan_classify(const slam_t *s)
 {
     for (int cy = 0; cy < PLAN_N; cy++)
-        for (int cx = 0; cx < PLAN_N; cx++) {
-            int free = 0, occupied = 0;
-            for (int j = 0; j < SLAM_PLAN_CELLS; j++) {
-                const int8_t *row = &s->grid[(cy * SLAM_PLAN_CELLS + j) * SLAM_SIZE + cx * SLAM_PLAN_CELLS];
-                for (int i = 0; i < SLAM_PLAN_CELLS; i++) {
-                    if (row[i] >= SLAM_OCCUPIED) occupied++;
-                    else if (row[i] <= SLAM_FREE) free++;
-                }
-            }
-            s_plan[cy * PLAN_N + cx] = occupied ? PLAN_BLOCKED : free >= PLAN_MIN_FREE ? PLAN_FREE : PLAN_UNKNOWN;
-        }
+        for (int cx = 0; cx < PLAN_N; cx++) s_plan[cy * PLAN_N + cx] = plan_class(s, cx, cy);
+}
+
+bool slam_frontier_open(const slam_t *s, uint16_t cell)
+{
+    static const int DX[4] = {1, -1, 0, 0}, DY[4] = {0, 0, 1, -1};
+    int cx = cell % PLAN_N, cy = cell / PLAN_N;
+    if (cy >= PLAN_N || plan_class(s, cx, cy) == PLAN_BLOCKED) return false;
+    for (int n = 0; n < 4; n++) {
+        int nx = cx + DX[n], ny = cy + DY[n];
+        if (nx >= 0 && ny >= 0 && nx < PLAN_N && ny < PLAN_N && plan_class(s, nx, ny) == PLAN_UNKNOWN)
+            return true;
+    }
+    return false;
 }
 
 static float plan_world(int c)
