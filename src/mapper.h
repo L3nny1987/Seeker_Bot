@@ -33,3 +33,17 @@ void mapper_request_reset(void);
 /* Read-only map access for streaming (cells may change while reading). */
 const int8_t *mapper_grid(void);
 uint16_t mapper_path(int16_t (*out)[2], uint16_t max);
+
+/* SLAM input recorder for offline replay: every scan with gyro yaw and
+   motor command goes to the inactive OTA slot (MAPPER_RECORD_SIZE bytes per
+   record, see mapper.c). Start erases the slot (robot idle). */
+#define MAPPER_RECORD_SIZE 768
+typedef struct {
+    bool active, erasing;
+    uint32_t records, capacity;
+} mapper_record_info_t;
+esp_err_t mapper_record_start(void);
+void mapper_record_stop(void);
+mapper_record_info_t mapper_record_info(void);
+/* Reads recorded bytes; false outside the recorded range. */
+bool mapper_record_read(uint32_t offset, void *out, size_t len);

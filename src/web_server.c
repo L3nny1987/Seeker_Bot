@@ -511,6 +511,8 @@ static esp_err_t ota_handler(httpd_req_t *req)
         robot_mode_t mode = robot_manager_status().mode;
         if (mode == ROBOT_MANUAL || mode == ROBOT_AUTO)
             return ota_error(req, "409 Conflict", "robot_busy");
+        if (mapper_record_info().erasing) return ota_error(req, "409 Conflict", "ota_busy");
+        mapper_record_stop();            /* the recording lives in the OTA slot */
         ota_drop("restart");
         s_ota.slot = esp_ota_get_next_update_partition(NULL);
         if (!s_ota.slot) return ota_error(req, "500 Internal Server Error", "no_ota_slot");
@@ -565,6 +567,49 @@ static esp_err_t ota_handler(httpd_req_t *req)
     return text_reply(req, NULL, reply);
 }
 
+/* SLAM recorder: GET status JSON, or ?offset=&len= raw records (<= 4 KB). */
+static esp_err_t record_get_handler(httpd_req_t *req)
+{
+    char query[64];
+    size_t offset, len;
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        query_size(query, "offset", &offset) && query_size(query, "len", &len)) {
+        if (len == 0 || len > sizeof(s_json) || !mapper_record_read(offset, s_json, len))
+            return ota_error(req, "400 Bad Request", "out_of_range");
+        headers(req);
+        httpd_resp_set_type(req, "application/octet-stream");
+        return httpd_resp_send(req, s_json, len);
+    }
+    mapper_record_info_t info = mapper_record_info();
+    char reply[128];
+    snprintf(reply, sizeof(reply),
+             "{\"active\":%s,\"erasing\":%s,\"records\":%lu,\"capacity\":%lu,\"recordSize\":%d}",
+             info.active ? "true" : "false", info.erasing ? "true" : "false",
+             (unsigned long)info.records, (unsigned long)info.capacity, MAPPER_RECORD_SIZE);
+    return text_reply(req, NULL, reply);
+}
+
+/* POST ?cmd=start|stop. Start erases the inactive OTA slot: robot idle. */
+static esp_err_t record_post_handler(httpd_req_t *req)
+{
+    char query[32], cmd[8];
+    const char *foreign = foreign_request(req);
+    if (foreign) return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, foreign);
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "cmd", cmd, sizeof(cmd)) != ESP_OK)
+        return ota_error(req, "400 Bad Request", "cmd_required");
+    if (!strcmp(cmd, "stop")) {
+        mapper_record_stop();
+        return text_reply(req, NULL, "{\"ok\":true}");
+    }
+    if (strcmp(cmd, "start")) return ota_error(req, "400 Bad Request", "cmd_required");
+    robot_mode_t mode = robot_manager_status().mode;
+    if (mode == ROBOT_MANUAL || mode == ROBOT_AUTO) return ota_error(req, "409 Conflict", "robot_busy");
+    if (ota_running() || s_ota.begun) return ota_error(req, "409 Conflict", "ota_busy");
+    if (mapper_record_start() != ESP_OK) return ota_error(req, "409 Conflict", "record_busy");
+    return text_reply(req, NULL, "{\"ok\":true}");
+}
+
 /* A freshly updated image proves itself by bringing the web server up. */
 static void confirm_image(void)
 {
@@ -582,6 +627,7 @@ esp_err_t seeker_web_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
     config.max_open_sockets = 6;
+    config.max_uri_handlers = 10;
     config.lru_purge_enable = true;
     config.open_fn = socket_open;
     config.recv_wait_timeout = 1;
@@ -598,6 +644,8 @@ esp_err_t seeker_web_start(void)
         { .uri = "/api/map", .method = HTTP_GET, .handler = map_handler },
         { .uri = "/api/control", .method = HTTP_POST, .handler = control_handler },
         { .uri = "/api/ota", .method = HTTP_POST, .handler = ota_handler },
+        { .uri = "/api/record", .method = HTTP_GET, .handler = record_get_handler },
+        { .uri = "/api/record", .method = HTTP_POST, .handler = record_post_handler },
     };
     for (unsigned i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
         err = httpd_register_uri_handler(s_server, &routes[i]);
