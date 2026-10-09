@@ -211,7 +211,7 @@ const autoHelp=document.createElement('p');autoHelp.className='small muted';auto
 const helpBox=document.createElement('details');helpBox.className='help';const helpTitle=document.createElement('summary');helpTitle.textContent='So arbeitet der Autonom-Modus';helpBox.append(helpTitle,autoHelp);document.querySelector('.commission').append(helpBox);
 const autoReadiness=document.createElement('p');autoReadiness.id='auto-readiness';autoReadiness.className='small muted';document.querySelector('.commission').before(autoReadiness);
 const resetInfo=document.createElement('p');resetInfo.id='reset-info';resetInfo.className='small muted';$('log').before(resetInfo);
-const diagLink=document.createElement('a');diagLink.href='/api/diag';diagLink.target='_blank';diagLink.rel='noopener';diagLink.className='small';diagLink.textContent='Diagnose-Log öffnen (Neustarts + Log vor dem Absturz)';resetInfo.after(diagLink);
+const diagLink=document.createElement('a');diagLink.href='/api/diag';diagLink.target='_blank';diagLink.rel='noopener';diagLink.className='small';diagLink.textContent='Diagnose-Log öffnen (Neustarts + Log vor dem Absturz)';$('log').before(diagLink);
 const settingGroups={abstand:'Sicherheitsabstände (ab Körper)',leistung:'Auto: Leistung & Lenkung',motor:'Motoren: Mindest-PWM & Anlauf',zeit:'Zeiten & Wandfolgen'};
 const settingFields={
  manualStopMm:['Manuell: Fahrstopp (mm)',20,2000,'abstand','Stoßstange → Hindernis; darunter fährt manuell nichts weiter'],
