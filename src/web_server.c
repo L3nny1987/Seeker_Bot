@@ -214,6 +214,12 @@ static esp_err_t status_handler(httpd_req_t *req)
         (unsigned long)stats.packets, (unsigned long)stats.rx_bytes, (unsigned long)stats.headers,
         (unsigned long)stats.rejected_packets, SEEKER_PIN_LIDAR_RX, SEEKER_LIDAR_BAUDRATE,
         sample, diagnostic, (unsigned long)stats.crc_errors);
+    int64_t pose_age = esp_timer_get_time() - s.map.feedback.timestamp_us;
+    put(&w, "\"slamWeak\":%s,\"slamDegenerate\":%s,\"poseAgeMs\":%lu,"
+        "\"lidarDroppedScans\":%lu,\"lidarUartErrors\":%lu,",
+        json_bool(s.map.weak), json_bool(s.map.degenerate),
+        (unsigned long)(s.map.feedback.timestamp_us && pose_age >= 0 ? pose_age / 1000 : UINT32_MAX),
+        (unsigned long)stats.dropped_scans, (unsigned long)stats.uart_errors);
     put(&w, "\"heap\":%lu,\"minHeap\":%lu,\"uptime\":%lld,\"resetReason\":%d,\"resetReasonText\":\"%s\",",
         (unsigned long)esp_get_free_heap_size(), (unsigned long)esp_get_minimum_free_heap_size(),
         (long long)(esp_timer_get_time() / 1000000), (int)esp_reset_reason(),

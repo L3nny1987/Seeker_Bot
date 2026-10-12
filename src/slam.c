@@ -28,8 +28,8 @@
    timing error there smears walls into rings. */
 #define MAP_OMEGA        0.35f      /* rad/s (20 deg/s) */
 #define MAP_QUALITY      0.5f
-/* A failed match must never move the pose far: velocities are bounded and
-   decay, implausible jumps are rejected, a lost pose relocalises in a wide
+/* A failed match never advances position: velocities are bounded and
+   cleared on rejection; a lost pose relocalises in a wide
    window around the last good position. */
 #define MAX_SPEED_MM_S   700.0f
 #define MAX_RATE         4.0f       /* rad/s, LiDAR-only rate estimate */
@@ -130,10 +130,14 @@ static slam_pose_t coarse(const slam_t *s, slam_pose_t pred, float rot, float tr
                           float rot_step, float trans_step, int point_step)
 {
     slam_pose_t best = pred;
-    float best_score = -1e9f;
-    for (float dt = -rot; dt <= rot + 1e-4f; dt += rot_step)
+    /* Always include zero: starting at -rot omitted the prediction for most
+       gyro uncertainties and introduced a directional bias on every scan. */
+    float best_score = score(s, pred, point_step);
+    int turns = (int)floorf(rot / rot_step);
+    for (int k = -turns; k <= turns; k++)
         for (float ox = -trans; ox <= trans + 1e-3f; ox += trans_step)
             for (float oy = -trans; oy <= trans + 1e-3f; oy += trans_step) {
+                float dt = k * rot_step;
                 slam_pose_t p = {pred.x + ox, pred.y + oy, pred.theta + dt};
                 /* Mild prior toward the prediction breaks ties in corridors. */
                 float sc = score(s, p, point_step) - 0.004f * (fabsf(ox) + fabsf(oy)) - 3.0f * fabsf(dt);
@@ -202,6 +206,35 @@ static float inliers(const slam_t *s, slam_pose_t p)
     return (float)hits / (float)(known > MIN_KNOWN ? known : MIN_KNOWN);
 }
 
+/* Parallel walls may match perfectly while giving no position information
+   along the corridor. A high inlier ratio alone cannot detect this. */
+static bool translation_observable(const slam_t *s, slam_pose_t p)
+{
+    float xx = 0, xy = 0, yy = 0, c = cosf(p.theta), sn = sinf(p.theta);
+    for (int i = 0; i < s_n; i++) {
+        float dx, dy;
+        sample(s, p.x + c * s_px[i] - sn * s_py[i],
+               p.y + sn * s_px[i] + c * s_py[i], &dx, &dy);
+        xx += dx * dx; xy += dx * dy; yy += dy * dy;
+    }
+    float trace = xx + yy;
+    /* det / trace^2 approaches zero when one translation axis is missing. */
+    return trace > 1e-6f && xx * yy - xy * xy > 0.005f * trace * trace;
+}
+
+static bool position_reachable(const slam_t *s, slam_pose_t p)
+{
+    float dx = p.x - s->pose.x, dy = p.y - s->pose.y;
+    int steps = (int)ceilf(hypotf(dx, dy) / (SLAM_RES_MM * 0.5f));
+    for (int i = 1; i <= steps; i++) {
+        float t = (float)i / steps;
+        int x = cell_of(s->pose.x + t * dx), y = cell_of(s->pose.y + t * dy);
+        if (x < 0 || y < 0 || x >= SLAM_SIZE || y >= SLAM_SIZE ||
+            s->grid[y * SLAM_SIZE + x] >= SLAM_OCCUPIED) return false;
+    }
+    return true;
+}
+
 static void update_cell(slam_t *s, int gx, int gy, int delta)
 {
     int8_t *cell = &s->grid[gy * SLAM_SIZE + gx];
@@ -262,10 +295,15 @@ bool slam_update(slam_t *s, const uint16_t raw[360], int front_deg, bool clockwi
 {
     lut();
     s->scans++;
-    float dt = s->last_ms ? (now_ms - s->last_ms) * 0.001f : 0.1f;
+    bool gap = s->last_ms && (now_ms <= s->last_ms || now_ms - s->last_ms > 500);
+    float dt = s->last_ms && now_ms > s->last_ms ? (now_ms - s->last_ms) * 0.001f : 0.1f;
     if (dt < 0.02f) dt = 0.02f;
     if (dt > 0.5f) dt = 0.5f;
     s->last_ms = now_ms;
+    if (gap && s->initialized) {
+        s->lost = true;
+        s->vx = s->vy = s->omega = 0;
+    }
     if (!moving) { s->vx = 0; s->vy = 0; s->omega = 0; }
     bool gyro = imu && imu->valid && s->initialized;
     s->imu_used = gyro;
@@ -280,7 +318,15 @@ bool slam_update(slam_t *s, const uint16_t raw[360], int front_deg, bool clockwi
     /* Standing still in this and the previous scan (no coasting). */
     bool still = !moving && !s->was_moving;
     s->was_moving = moving;
-    if (s_n < MIN_POINTS) { s->rejected++; return false; }
+    if (s_n < MIN_POINTS) {
+        s->quality = 0;
+        s->rejected++;
+        if (s->initialized && ++s->bad_matches >= LOST_AFTER) s->lost = true;
+        s->vx = s->vy = s->omega = 0;
+        if (gyro) s->pose.theta = wrap_pi(s->pose.theta + imu->dtheta - s->gyro_bias * dt);
+        s->kf_ready = false;
+        return false;
+    }
     if (!s->initialized) {
         s->initialized = true;
         integrate(s, s->pose, true);
@@ -332,18 +378,23 @@ bool slam_update(slam_t *s, const uint16_t raw[360], int front_deg, bool clockwi
         p = refine(s, coarse(s, pred, rot, trans, rot > 0.2f ? 0.035f : 0.0175f, 50.0f, COARSE_STEP));
     }
     s->quality = inliers(s, p);
+    s->degenerate = !translation_observable(s, p);
+    float max_step = moving ? MAX_SPEED_MM_S * dt + 30.0f : 50.0f;
     bool plausible = hypotf(p.x - pred.x, p.y - pred.y) <= trans + JUMP_MARGIN_MM &&
+                     (reloc || hypotf(p.x - s->pose.x, p.y - s->pose.y) <= max_step) &&
                      fabsf(wrap_pi(p.theta - pred.theta)) <= rot + 0.1f &&
                      fabsf(p.x) < GRID_LIMIT_MM && fabsf(p.y) < GRID_LIMIT_MM;
-    if (s->quality < (reloc ? RELOC_QUALITY : GOOD_QUALITY) || !plausible) {
+    if (plausible && s->grid[cell_of(p.y) * SLAM_SIZE + cell_of(p.x)] >= SLAM_OCCUPIED)
+        plausible = false;                       /* robot cannot pass through a mapped wall */
+    if (plausible && !reloc && !position_reachable(s, p)) plausible = false;
+    if (s->quality < (reloc ? RELOC_QUALITY : GOOD_QUALITY) || !plausible || s->degenerate) {
         s->rejected++;
         if (!reloc && ++s->bad_matches >= LOST_AFTER) s->lost = true;
-        /* Hold the position (decaying velocity), heading from the gyro:
-           extrapolating an unverified velocity let the pose run away. */
-        s->vx *= 0.5f; s->vy *= 0.5f;
-        if (!gyro) s->omega *= 0.5f;
-        if (fabsf(pred.x) < GRID_LIMIT_MM && fabsf(pred.y) < GRID_LIMIT_MM) s->pose = pred;
-        else s->pose.theta = pred.theta;
+        /* No wheel odometry: an unmatched velocity is not a measurement.
+           Keep the last verified position, never feed the prediction back
+           into itself or the map. Only the gyro can advance heading. */
+        s->vx = s->vy = s->omega = 0;
+        if (gyro) s->pose.theta = pred.theta;
         return false;
     }
     s->bad_matches = 0;

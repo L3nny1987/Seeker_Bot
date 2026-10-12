@@ -160,6 +160,72 @@ static void hall_test(void)
     free(g);
 }
 
+static void reliability_tests(void)
+{
+    slam_t *g = calloc(1, sizeof(*g));
+    uint16_t raw[360];
+    slam_reset(g);
+    for (int i = 0; i < 8; i++) {
+        scan(raw, 0, 0, 0, 0, 0, 0);
+        slam_update(g, raw, 0, true, 100, 1000 + i * 100, false, NULL);
+    }
+    slam_pose_t anchor = g->pose;
+    uint32_t integrated = g->integrated;
+    /* Regression: the previous failure path advanced by vx * dt on every
+       rejected scan. Even a single failed match must not move the position. */
+    g->vx = 500; g->vy = 200;
+    for (int i = 0; i < 360; i++) raw[i] = 100;
+    assert(!slam_update(g, raw, 0, true, 100, 1800, true, NULL));
+    assert(g->pose.x == anchor.x && g->pose.y == anchor.y && g->vx == 0 && g->vy == 0);
+    assert(g->integrated == integrated);
+    /* Sparse/empty scans used to bypass bad_matches and leave lost=false. */
+    for (int i = 0; i < 360; i++) raw[i] = 0;
+    for (int i = 0; i < 20; i++)
+        assert(!slam_update(g, raw, 0, true, 100, 1900 + i * 100, true, NULL));
+    assert(g->lost && g->quality == 0 && g->integrated == integrated);
+    assert(g->pose.x == anchor.x && g->pose.y == anchor.y);
+    free(g);
+
+    g = calloc(1, sizeof(*g));
+    slam_reset(g);
+    for (int i = 0; i < 8; i++) {
+        scan(raw, 0, 0, 0, 0, 0, 0);
+        slam_update(g, raw, 0, true, 100, 1000 + i * 100, false, NULL);
+    }
+    anchor = g->pose;
+    /* Candidate beyond a thin mapped wall: endpoint alone is free, but
+       accepting the jump would let the estimated robot leave the room. */
+    for (int y = SLAM_ORIGIN - 2; y <= SLAM_ORIGIN + 2; y++)
+        g->grid[y * SLAM_SIZE + SLAM_ORIGIN + 1] = 100;
+    scan(raw, 100, 0, 0, 0, 0, 0);
+    assert(!slam_update(g, raw, 0, true, 100, 1800, true, NULL));
+    assert(g->pose.x == anchor.x && g->pose.y == anchor.y);
+    /* A long input gap is a localization break, even if no frames were
+       delivered in between to increment the rejected-match counter. */
+    for (int i = 0; i < 360; i++) raw[i] = 0;
+    assert(!slam_update(g, raw, 0, true, 100, 3800, true, NULL));
+    assert(g->lost && g->pose.x == anchor.x && g->pose.y == anchor.y);
+    free(g);
+
+    /* A perfect match to two infinitely long parallel walls cannot prove
+       forward travel. Reject the unobservable translation instead of drifting. */
+    g = calloc(1, sizeof(*g));
+    slam_reset(g);
+    g->initialized = true;
+    for (int y = SLAM_ORIGIN - 20; y <= SLAM_ORIGIN + 20; y++)
+        for (int x = 0; x < SLAM_SIZE; x++)
+            g->grid[y * SLAM_SIZE + x] = abs(y - SLAM_ORIGIN) == 20 ? 100 : -30;
+    for (int i = 0; i < 360; i++) {
+        double s = fabs(sin(i * PI / 180));
+        raw[i] = s > 0.15 ? (uint16_t)(1000 / s) : 0;
+    }
+    g->vx = 500;
+    assert(!slam_update(g, raw, 0, true, 100, 1000, true, NULL));
+    assert(g->degenerate && g->pose.x == 0 && g->pose.y == 0 && !g->integrated);
+    free(g);
+    puts("reliability: rejected velocity frozen, sparse scans/gaps detected, wall crossing and parallel-wall ambiguity rejected");
+}
+
 /* Planning-cell indices below are relative to a 192-cell grid (origin at
    planning cell 24); PO shifts them to the actual grid size. */
 #define PO (SLAM_PLAN_SIZE / 2 - 24)
@@ -348,6 +414,7 @@ int main(void)
     plan_path_tests();
     latency_spin_test();
     hall_test();
+    reliability_tests();
 
     /* Fast spin at 6.5 rad/s (37 deg per scan, beyond the LiDAR-only search
        window) with a gyro that has 3 % scale error and bias. */

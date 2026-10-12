@@ -111,8 +111,20 @@ static navigation_wall_t fit_wall(const uint16_t r[360], int side)
 
 void navigation_fuse(const uint16_t current[360], const uint16_t *previous, uint16_t out[360])
 {
-    for (int i = 0; i < 360; i++)
-        out[i] = current[i] ? current[i] : previous ? previous[i] : 0;
+    for (int i = 0; i < 360; i++) {
+        out[i] = current[i];
+        if (current[i] || !previous || !previous[i]) continue;
+        uint16_t left = current[(i + 359) % 360], right = current[(i + 1) % 360];
+        unsigned tolerance = 80 + previous[i] / 10;
+        /* Only isolated holes on a still-present surface. Copying whole
+           missing sectors hid sensor failures and left ghost walls after turns. */
+        if (left && right && abs((int)left - previous[i]) <= (int)tolerance &&
+            abs((int)right - previous[i]) <= (int)tolerance) {
+            out[i] = previous[i];
+            if (left < out[i]) out[i] = left;
+            if (right < out[i]) out[i] = right;
+        }
+    }
 }
 
 static uint16_t minus(uint16_t value, int body)
@@ -241,10 +253,9 @@ static unsigned difference(unsigned a, unsigned b)
 #define NAV_ROUTE_ALIGNED_DEG   8.0f
 #define NAV_COURSE_HOLD_DEG     8.0f
 #define NAV_COURSE_DONE_DEG     3.0f
-/* Weak or lost SLAM: stand still for a while (standing scans re-anchor the
-   pose), then continue anyway and do not pause again for a while. */
-#define NAV_SLAM_WAIT_MS        3000
-#define NAV_SLAM_RETRY_MS       6000
+#define NAV_COURSE_PULSE_MS     80
+#define NAV_COURSE_SETTLE_MS    120
+#define NAV_COURSE_COAST_S      0.04f
 /* Tight spots: after NAV_MAX_ATTEMPTS normal escapes, short pulses with
    bare-body clearances (reverse, rotate, forward, rotate). */
 #define NAV_WIGGLE_CYCLES       8
@@ -315,6 +326,42 @@ static navigation_plan_t steer(const motion_settings_t *cfg, float error, unsign
     return p;
 }
 
+/* The turn axis needs >=80 % PWM. Modulate time, not sub-stall PWM:
+   short pulses followed by settling and fresh pose feedback. With a gyro,
+   stop early when measured rotation is about to consume the heading error. */
+static navigation_plan_t course(navigation_auto_t *s, const navigation_view_t *v,
+    const motion_settings_t *cfg, float error, unsigned free_ahead, bool uncertain,
+    uint64_t now, const char *reason)
+{
+    navigation_plan_t p = steer(cfg, error, free_ahead, uncertain, reason);
+    p.precision = true;
+    uint32_t feedback = v->pose_sequence ? v->pose_sequence : s->sequence;
+    int direction = error > 0 ? 1 : error < 0 ? -1 : 0;
+    float predicted = error + (v->heading_live ? v->yaw_rate * RAD2DEG * NAV_COURSE_COAST_S : 0);
+    bool consumed = fabsf(predicted) < NAV_COURSE_DONE_DEG || predicted * error <= 0;
+    if (s->course_direction) {
+        if (!p.turn || direction != s->course_direction || consumed || now >= s->course_until_ms) {
+            s->course_direction = 0;
+            s->course_settle_ms = now + NAV_COURSE_SETTLE_MS;
+            s->course_sequence = feedback;
+            p.turn = 0;
+        }
+        return p;
+    }
+    if (!p.turn || consumed || now < s->course_settle_ms ||
+        (s->course_settle_ms && !v->heading_live && feedback == s->course_sequence)) {
+        p.turn = 0;
+        return p;
+    }
+    float rate = v->heading_live ? fabsf(v->yaw_rate) * RAD2DEG : 0;
+    if (rate < 85.0f) rate = 85.0f;
+    unsigned pulse = (unsigned)clampf((fabsf(error) - NAV_COURSE_DONE_DEG) * 1000.0f / rate,
+                                      20, NAV_COURSE_PULSE_MS);
+    s->course_direction = direction;
+    s->course_until_ms = now + pulse;
+    return p;
+}
+
 /* No odometry: SLAM pose change (or, without a pose, changing distances)
    proves travel. Otherwise the tracks slip or something below the scan
    plane blocks the robot. */
@@ -370,8 +417,8 @@ static navigation_plan_t wiggle_step(navigation_auto_t *s, const navigation_view
     const motion_settings_t *cfg, uint64_t now, bool forward)
 {
     navigation_plan_t p = {.reason = "wiggle_pause", .tight = true};
-    bool back = v->tight_rear_mm > NAV_WIGGLE_CLEAR_MM;
-    bool ahead = v->tight_front_mm > NAV_WIGGLE_CLEAR_MM;
+    bool back = v->rear_known && v->tight_rear_mm > NAV_WIGGLE_CLEAR_MM;
+    bool ahead = v->front_known && v->tight_front_mm > NAV_WIGGLE_CLEAR_MM;
     bool spin = v->rotation_known && v->swing_mm > NAV_WIGGLE_SWING_MM;
     uint64_t elapsed = now - s->since_ms;
     if (s->wiggle_drive || s->wiggle_turn) {
@@ -415,6 +462,8 @@ static navigation_plan_t start_maneuver(navigation_auto_t *s, const navigation_v
 {
     navigation_plan_t p = {.reason = "escape_brake"};
     s->cruising = false;
+    s->course_direction = 0;
+    s->course_settle_ms = 0;
     if (s->attempts >= NAV_MAX_ATTEMPTS) {
         if (s->wiggle_cycles >= NAV_WIGGLE_CYCLES) return block(s, v, now);
         /* Normal escapes failed: wiggle out with tight clearances. */
@@ -488,6 +537,13 @@ static navigation_plan_t follow_route(navigation_auto_t *s, const navigation_vie
         s->correcting = false;
         if (!c->rotate)
             return start_maneuver(s, v, cfg, c->best, c->rotate, c->rear, false, now, turn, side);
+        if (size <= 25.0f) {
+            p = course(s, v, cfg, error, c->center, c->uncertain, now, turn);
+            p.drive = 0;
+            return p;
+        }
+        s->course_direction = 0;
+        s->course_settle_ms = 0;
         /* Slower near the target heading: less overshoot. */
         float magnitude = clampf(size / 60.0f, 0, 1);
         p.turn = side * (cfg->steer_min_percent +
@@ -511,32 +567,34 @@ static navigation_plan_t follow_route(navigation_auto_t *s, const navigation_vie
             s->correcting = false;
             error = 0;
         } else s->correcting = true;
-        return steer(cfg, error, toward < c->center ? toward : c->center, c->uncertain, follow);
+        return course(s, v, cfg, error, toward < c->center ? toward : c->center,
+                      c->uncertain, now, follow);
     }
     s->detail = avoid;
     s->correcting = false;
     return steer(cfg, s->heading_filtered, c->center, c->uncertain, avoid);
 }
 
-/* Map-based strategies pause while SLAM is weak or lost. */
+/* Re-localisation is a condition, not a timer. Never resume a map strategy
+   merely because waiting timed out, and interrupt escape maneuvers too. */
 static bool slam_pause(navigation_auto_t *s, const navigation_view_t *v, uint64_t now)
 {
-    bool map_mode = s->strategy == NAV_STRATEGY_EXPLORE || s->strategy == NAV_STRATEGY_PATH;
+    bool map_mode = s->strategy == NAV_STRATEGY_EXPLORE || s->strategy == NAV_STRATEGY_PATH ||
+                    s->strategy == NAV_STRATEGY_GOAL;
     if (!map_mode || !(v->map_lost || v->map_weak)) {
         s->slam_waiting = false;
-        if (s->slam_retry && now - s->slam_wait_ms >= NAV_SLAM_RETRY_MS) s->slam_retry = false;
         return false;
     }
-    if (s->slam_retry) {
-        if (now - s->slam_wait_ms < NAV_SLAM_RETRY_MS) return false;
-        s->slam_retry = false;
+    if (!s->slam_waiting) {
+        s->slam_wait_ms = now;
+        phase(s, NAV_RECHECK, now);
     }
-    if (!s->slam_waiting) { s->slam_waiting = true; s->slam_wait_ms = now; }
-    if (now - s->slam_wait_ms < NAV_SLAM_WAIT_MS) return true;
-    s->slam_waiting = false;
-    s->slam_retry = true;
-    s->slam_wait_ms = now;
-    return false;
+    s->slam_waiting = true;
+    s->cruising = s->driving = s->snapshot_valid = false;
+    s->route_turning = s->correcting = s->route_missing = false;
+    s->course_direction = 0;
+    s->course_settle_ms = 0;
+    return true;
 }
 
 static navigation_plan_t explore_step(navigation_auto_t *s, const navigation_view_t *v,
@@ -646,7 +704,11 @@ static navigation_plan_t goal_step(navigation_auto_t *s, const navigation_view_t
                               -s->wall_side);
     }
     unsigned ahead_free = toward < c->center ? toward : c->center;
-    return steer(cfg, error, ahead_free, c->uncertain, "goal_seek");
+    if (fabsf(error) < (s->correcting ? NAV_COURSE_DONE_DEG : NAV_COURSE_HOLD_DEG)) {
+        s->correcting = false;
+        error = 0;
+    } else s->correcting = true;
+    return course(s, v, cfg, error, ahead_free, c->uncertain, now, "goal_seek");
 }
 
 /* Go to a point along the SLAM map path: steer straight at the waypoint
@@ -694,8 +756,8 @@ navigation_plan_t navigation_auto_step(navigation_auto_t *s, const navigation_vi
     bool driving = s->driving && s->cruising && s->phase == NAV_CRUISE;
     c.threshold = driving ? (unsigned)cfg.auto_stop_mm : resume;
     c.center = v->free_mm[NAV_CENTER];
-    c.forward = c.center > c.threshold;
-    c.rear = v->rear_free_mm > resume;
+    c.forward = v->front_known && c.center > c.threshold;
+    c.rear = v->rear_known && !v->rear_uncertain && v->rear_free_mm > resume;
     c.rotate = v->rotation_known && v->swing_mm > cfg.auto_rotate_mm;
     c.uncertain = v->uncertain_mask & (1u << NAV_CENTER);
     bool explore = s->strategy == NAV_STRATEGY_EXPLORE || s->strategy == NAV_STRATEGY_WALL_LEFT ||
@@ -704,6 +766,12 @@ navigation_plan_t navigation_auto_step(navigation_auto_t *s, const navigation_vi
     if (c.best >= 0) s->heading_deg = navigation_heading_deg(c.best);
     if (new_scan || !s->cruising)
         s->heading_filtered += 0.5f * (s->heading_deg - s->heading_filtered);
+
+    if (slam_pause(s, v, now)) {
+        s->detail = "slam_wait";
+        p.reason = "slam_wait";
+        return p;
+    }
 
     if (s->phase == NAV_WIGGLE) {
         navigation_plan_t w = wiggle_step(s, v, &cfg, now, c.forward);
@@ -731,13 +799,6 @@ navigation_plan_t navigation_auto_step(navigation_auto_t *s, const navigation_vi
             s->attempts = s->wiggle_cycles = 0;
         if (stalled(s, v, cfg.ramp_ms, now))
             return start_maneuver(s, v, &cfg, c.best, c.rotate, c.rear, true, now, "stuck_no_progress", 0);
-        if (slam_pause(s, v, now)) {
-            s->detail = "slam_wait";
-            s->driving = false;
-            s->snapshot_valid = false;           /* waiting is not stalling */
-            p.reason = "slam_wait";
-            return p;
-        }
         navigation_plan_t plan;
         if (s->strategy == NAV_STRATEGY_GOAL) plan = goal_step(s, v, &cfg, now, &c);
         else if (s->strategy == NAV_STRATEGY_PATH) plan = path_step(s, v, &cfg, now, &c);
@@ -755,7 +816,7 @@ navigation_plan_t navigation_auto_step(navigation_auto_t *s, const navigation_vi
     }
     if (s->phase == NAV_REVERSE) {
         /* The rear corridor is checked on every tick, not only at start. */
-        if (v->rear_free_mm <= (unsigned)cfg.auto_stop_mm ||
+        if (!v->rear_known || v->rear_uncertain || v->rear_free_mm <= (unsigned)cfg.auto_stop_mm ||
             now - s->since_ms >= (uint64_t)cfg.reverse_ms) {
             phase(s, c.rotate ? NAV_TURN : NAV_RECHECK, now);
             if (!c.rotate) return p;

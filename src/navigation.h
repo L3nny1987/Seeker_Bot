@@ -42,13 +42,15 @@ typedef struct {
     /* Filled by the caller from SLAM (optional). */
     bool pose_valid;
     float pose_x, pose_y, pose_theta;   /* mm, mm, rad */
+    uint32_t pose_sequence;            /* scan used by the mapper */
+    bool heading_live;                 /* heading advanced by fresh gyro data */
+    float yaw_rate;                    /* rad/s, CCW; only valid with heading_live */
     int16_t explore_bonus[NAV_HEADINGS];
     /* Map path to the goal (NAV_STRATEGY_PATH): next waypoint in line of
        sight and the planned goal (may be moved off a wall). */
     bool route_valid;
     float route_way_x, route_way_y, route_goal_x, route_goal_y;
-    /* SLAM health: lost, or weak (young map / failing matches). Map-based
-       strategies pause briefly so the map can lock on standing still. */
+    /* Map strategies remain stopped until localization is healthy again. */
     bool map_lost, map_weak;
 } navigation_view_t;
 
@@ -57,14 +59,15 @@ typedef struct {
     const char *reason;
     bool done;                          /* strategy finished: stop auto */
     bool tight;                         /* short pulses: limit the start kick */
+    bool precision;                     /* bounded course pulse: no long motor kick */
 } navigation_plan_t;
 
 /* Robot body relative to the LiDAR centre (mm). The LiDAR sits on the
    centre line; rotation is assumed around the middle of the body. */
 typedef struct { int front_mm, rear_mm, half_width_mm; } navigation_body_t;
 
-/* Fill single missing returns of the current scan from the previous scan
-   (previous may be NULL). Never removes a measured obstacle. */
+/* Fill isolated holes only when both current neighbours agree with the
+   preceding stationary scan (NULL while moving). Measured obstacles remain. */
 void navigation_fuse(const uint16_t current[360], const uint16_t *previous, uint16_t out[360]);
 navigation_view_t navigation_analyze(const uint16_t distance[360], int front_deg, bool clockwise,
                                      int corridor_width_mm, navigation_body_t body);
@@ -114,8 +117,11 @@ typedef struct {
     uint64_t route_missing_ms;
     bool route_turning;                 /* rotating in place toward the waypoint */
     bool correcting;                    /* course correction active (hysteresis) */
-    /* SLAM pause. */
-    bool slam_waiting, slam_retry;
+    int course_direction;
+    uint64_t course_until_ms, course_settle_ms;
+    uint32_t course_sequence;
+    /* SLAM pause (condition-based; no timed retry with an unverified pose). */
+    bool slam_waiting;
     uint64_t slam_wait_ms;
 } navigation_auto_t;
 

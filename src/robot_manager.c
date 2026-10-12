@@ -1,5 +1,6 @@
 #include "robot_manager.h"
 #include "diag.h"
+#include "imu.h"
 #include "ld20_lidar.h"
 #include "track_drive.h"
 #include "seeker_pins.h"
@@ -130,21 +131,25 @@ static void manager_task(void *arg)
     static ld20_scan_t scan;
     static uint16_t previous[360], fused[360];
     uint32_t previous_sequence = 0, view_sequence = 0;
+    bool previous_stationary = false;
     int view_width = 0;
     navigation_view_t view = {0};
     while (true) {
         bool fresh = ld20_lidar_get_scan(&scan, 0) == ESP_OK;
         xSemaphoreTake(s_lock, portMAX_DELAY);
         int width = s_status.settings.robot_width_mm;
+        bool stationary = !s_status.drive && !s_status.turn;
         xSemaphoreGive(s_lock);
         if (scan.sequence != view_sequence || width != view_width) {
             /* Analyse each revolution once, outside the lock. Single
                dropouts are filled from the directly preceding revolution. */
-            bool consecutive = previous_sequence && scan.sequence == previous_sequence + 1;
+            bool consecutive = stationary && previous_stationary && previous_sequence &&
+                               scan.sequence == previous_sequence + 1;
             navigation_fuse(scan.distance_mm, consecutive ? previous : NULL, fused);
             if (scan.sequence != previous_sequence) {
                 memcpy(previous, scan.distance_mm, sizeof(previous));
                 previous_sequence = scan.sequence;
+                previous_stationary = stationary;
             }
             view = navigation_analyze(fused, SEEKER_LIDAR_FRONT_DEG, SEEKER_LIDAR_CLOCKWISE, width, BODY);
             mapper_explore_bonus(view.explore_bonus);
@@ -153,18 +158,30 @@ static void manager_task(void *arg)
         }
         /* SLAM pose of the latest matched scan (mapper task, own lock). */
         mapper_info_t map = mapper_info();
-        view.pose_valid = map.valid;
+        int64_t now = esp_timer_get_time();
+        bool pose_fresh = pose_feedback_fresh(map.feedback, now);
+        view.pose_valid = map.valid && pose_fresh;
         view.pose_x = map.x;
         view.pose_y = map.y;
         view.pose_theta = map.theta;
-        view.route_valid = map.valid && map.target.valid;
+        view.pose_sequence = map.scan_sequence;
+        view.heading_live = false;
+        view.yaw_rate = 0;
+        double yaw, prior_yaw;
+        uint32_t epoch, prior_epoch;
+        if (imu_yaw_at(now, &yaw, &epoch) &&
+            pose_feedback_heading(map.feedback, now, yaw, epoch, map.theta, map.gyro_bias, &view.pose_theta) &&
+            imu_yaw_at(now - 20000, &prior_yaw, &prior_epoch) && prior_epoch == epoch) {
+            view.heading_live = true;
+            view.yaw_rate = (float)((yaw - prior_yaw) / 0.02) - map.gyro_bias;
+        }
+        view.route_valid = view.pose_valid && map.target.valid;
         view.route_way_x = map.target.way_x;
         view.route_way_y = map.target.way_y;
         view.route_goal_x = map.target.x;
         view.route_goal_y = map.target.y;
         view.map_lost = map.lost;
-        view.map_weak = map.weak;
-        int64_t now = esp_timer_get_time();
+        view.map_weak = map.weak || !pose_fresh;
         xSemaphoreTake(s_lock, portMAX_DELAY);
         s_status.view = view;
         s_status.coverage = scan.valid_sectors;
@@ -184,6 +201,7 @@ static void manager_task(void *arg)
         s_status.link_ok = link_ok;
         int drive = 0, turn = 0;
         bool tight = false;
+        bool precision = false;
         if (s_status.mode == ROBOT_MANUAL) {
             if (now - s_manual_time > SEEKER_MANUAL_TIMEOUT_MS * 1000LL) {
                 s_requested_drive = s_requested_turn = 0;
@@ -219,7 +237,7 @@ static void manager_task(void *arg)
                     s_status.settings, now / 1000, scan.sequence);
                 if (p.done) stop_locked(ROBOT_IDLE, p.reason);
                 else {
-                    drive = p.drive; turn = p.turn; tight = p.tight;
+                    drive = p.drive; turn = p.turn; tight = p.tight; precision = p.precision;
                     s_status.reason = p.reason;
                 }
             }
@@ -229,8 +247,12 @@ static void manager_task(void *arg)
         int drive_kick = cfg->drive_kick_ms, turn_kick = cfg->turn_kick_ms;
         if (tight && drive_kick > TIGHT_KICK_MS) drive_kick = TIGHT_KICK_MS;
         if (tight && turn_kick > TIGHT_KICK_MS) turn_kick = TIGHT_KICK_MS;
+        /* A course pulse is at most 80 ms. A 300 ms start kick and a slow
+           down-ramp would turn a small correction into a large oscillation. */
+        if (precision && turn_kick > SEEKER_MANAGER_PERIOD_MS) turn_kick = SEEKER_MANAGER_PERIOD_MS;
         int actual_drive = axis(&s_drive_axis, drive, cfg->drive_min_percent, drive_kick, cfg->ramp_ms);
-        int actual_turn = axis(&s_turn_axis, turn, cfg->turn_min_percent, turn_kick, cfg->turn_ramp_ms);
+        int actual_turn = axis(&s_turn_axis, turn, cfg->turn_min_percent, turn_kick,
+                              precision ? 0 : cfg->turn_ramp_ms);
         if (s_status.mode != ROBOT_ESTOP && s_status.mode != ROBOT_FAULT) {
             if (track_drive_set(actual_drive, actual_turn) != ESP_OK) {
                 track_drive_emergency_stop();
@@ -378,6 +400,10 @@ robot_status_t robot_manager_status(void)
     robot_status_t status = s_status;
     int64_t now = esp_timer_get_time();
     status.map = map;
+    if (!pose_feedback_fresh(map.feedback, now)) {
+        status.map.valid = false;
+        status.map.weak = true;
+    }
     status.strategy = navigation_strategy_name(s_navigation.strategy);
     status.nav_detail = s_navigation.detail ? s_navigation.detail : "idle";
     status.goal_set = s_navigation.strategy == NAV_STRATEGY_GOAL ||

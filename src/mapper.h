@@ -1,14 +1,18 @@
 #pragma once
 #include "esp_err.h"
 #include "slam.h"
+#include "pose_feedback.h"
 #include <stdbool.h>
 #include <stdint.h>
 
 typedef struct {
     bool valid, lost;
     bool weak;                   /* young map or failing matches */
+    bool degenerate;             /* visible walls leave a translation axis unconstrained */
     float x, y, theta, quality;
     uint32_t scans, integrated, rejected, update_ms;
+    uint32_t scan_sequence;
+    pose_feedback_t feedback;     /* gyro reference at the published scan pose */
     unsigned known_cells;
     uint16_t path_count;
     bool imu;                    /* last scan used the gyro */

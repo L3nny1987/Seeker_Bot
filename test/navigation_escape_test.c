@@ -437,9 +437,9 @@ static void map_route_tests(void)
     pose(&v, 0, 0, 1.38f);                        /* 11 deg: correct */
     p = navigation_auto_step(&s,&v,config,400,5);
     assert(p.drive > 85 && p.turn < -50 && !strcmp(p.reason,"explore_follow"));
-    pose(&v, 0, 0, 1.50f);                        /* 4 deg: finish correcting */
+    pose(&v, 0, 0, 1.50f);                        /* pulse expired: settle before another correction */
     p = navigation_auto_step(&s,&v,config,500,6);
-    assert(p.turn < 0);
+    assert(!p.turn && p.precision);
     pose(&v, 0, 0, 1.56f);
     p = navigation_auto_step(&s,&v,config,600,7);
     assert(p.drive==90 && !p.turn);
@@ -453,7 +453,7 @@ static void map_route_tests(void)
     assert(p.drive==90 && !strcmp(p.reason,"cruise"));
 }
 
-/* Weak SLAM pauses map strategies for a while, then they carry on. */
+/* Weak SLAM pauses until healthy, including during an escape maneuver. */
 static void slam_wait_tests(void)
 {
     navigation_auto_t s;
@@ -466,9 +466,9 @@ static void slam_wait_tests(void)
     p = navigation_auto_step(&s,&v,config,2900,20);
     assert(!p.drive && !strcmp(p.reason,"slam_wait"));
     p = navigation_auto_step(&s,&v,config,3000,21);
-    assert(p.drive==90);                          /* gave up waiting */
+    assert(!p.drive && !p.turn && !strcmp(p.reason,"slam_wait"));
     p = navigation_auto_step(&s,&v,config,3100,22);
-    assert(p.drive==90);
+    assert(!p.drive && !p.turn);
     v.front_mm = 1500;                            /* progress, not stuck */
     p = navigation_auto_step(&s,&v,config,9100,60);
     assert(!p.drive && !strcmp(p.reason,"slam_wait"));
@@ -478,6 +478,13 @@ static void slam_wait_tests(void)
     v.map_lost = true;                            /* lost counts as weak */
     p = navigation_auto_step(&s,&v,config,9300,62);
     assert(!strcmp(p.reason,"slam_wait"));
+    s.phase = NAV_REVERSE; s.cruising = false;
+    p = navigation_auto_step(&s,&v,config,20000,100);
+    assert(!p.drive && !p.turn && !strcmp(p.reason,"slam_wait"));
+    navigation_auto_configure(&s, NAV_STRATEGY_GOAL, 3000, 0);
+    pose(&v, 0, 0, 0);
+    p = navigation_auto_step(&s,&v,config,21000,101);
+    assert(!p.drive && !p.turn && !strcmp(p.reason,"slam_wait"));
     /* Reactive strategies ignore the map. */
     navigation_auto_configure(&s, NAV_STRATEGY_WALL_RIGHT, 0, 0);
     v = open_view(2000); v.map_weak = true; v.wall_right = (navigation_wall_t){true, 350, 0};

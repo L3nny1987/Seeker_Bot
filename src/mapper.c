@@ -18,12 +18,16 @@
 #define TARGET_PULL        2500     /* heading bonus toward the waypoint */
 #define TARGET_PULL_DEG    60.0f
 #define WEAK_INTEGRATED    5        /* map younger than this: weak */
-#define WEAK_BAD_MATCHES   2        /* consecutive rejected matches: weak */
+#define WEAK_BAD_MATCHES   1        /* an unverified position must not guide motion */
+#define RECOVERY_MATCHES   3        /* avoid stop/start on alternating good/bad scans */
 
 static const char *TAG = "mapper";
 static slam_t s_slam;                  /* ~43 KB, written only by the mapper task */
 static SemaphoreHandle_t s_lock;
 static mapper_info_t s_info;
+static pose_feedback_t s_feedback;
+static uint32_t s_pose_sequence;
+static unsigned s_good_matches;
 static volatile bool s_moving, s_reset;
 static uint8_t s_avoid[SLAM_PLAN_SIZE * SLAM_PLAN_SIZE];
 static slam_target_t s_target;
@@ -38,11 +42,13 @@ static volatile uint32_t s_rec_count;
 static void publish(uint32_t update_ms)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_info.valid = s_slam.initialized && !s_slam.lost;
+    s_info.valid = s_slam.initialized && !s_slam.lost && !s_slam.bad_matches && !s_slam.degenerate;
     s_info.lost = s_slam.lost;
-    /* Young map or failing matches: navigation stands still briefly. */
-    s_info.weak = s_slam.initialized && !s_slam.lost &&
-                  (s_slam.integrated < WEAK_INTEGRATED || s_slam.bad_matches >= WEAK_BAD_MATCHES);
+    s_info.degenerate = s_slam.degenerate;
+    /* Remain stopped until the map has matured and matches are healthy. */
+    s_info.weak = !s_slam.initialized || s_slam.degenerate ||
+                  s_slam.integrated < WEAK_INTEGRATED || s_slam.bad_matches >= WEAK_BAD_MATCHES ||
+                  s_good_matches < RECOVERY_MATCHES;
     s_info.x = s_slam.pose.x;
     s_info.y = s_slam.pose.y;
     s_info.theta = s_slam.pose.theta;
@@ -53,6 +59,8 @@ static void publish(uint32_t update_ms)
     s_info.known_cells = s_slam.known_cells;
     s_info.path_count = s_slam.path_count;
     s_info.update_ms = update_ms;
+    s_info.feedback = s_feedback;
+    s_info.scan_sequence = s_pose_sequence;
     s_info.imu = s_slam.imu_used;
     s_info.heading_sigma = slam_heading_sigma(&s_slam);
     s_info.gyro_bias = s_slam.gyro_bias;
@@ -76,10 +84,11 @@ static void avoid(uint16_t cell)
    follow the map path to it until it is reached, explored or given up;
    re-choosing every update made the robot weave between targets. Targets
    that cannot be reached or resolved are blacklisted. */
-static void update_target(uint64_t now_ms)
+static void update_target(uint64_t now_ms, bool reset)
 {
     static slam_target_t current;
     static uint64_t last_ms, driven_ms;
+    if (reset) { current.valid = false; last_ms = now_ms; driven_ms = 0; }
     if (!s_slam.initialized || s_slam.lost) { s_target.valid = false; return; }
     if (s_goal_active) {
         /* Go-to-point: shortest path over the map instead of frontiers. */
@@ -237,7 +246,7 @@ static void mapper_task(void *arg)
             goal_x = s_goal_x;
             goal_y = s_goal_y;
             s_target.valid = false;
-            update_target((uint64_t)(esp_timer_get_time() / 1000));
+            update_target((uint64_t)(esp_timer_get_time() / 1000), false);
             publish(0);
         }
         if (s_reset) {
@@ -246,6 +255,10 @@ static void mapper_task(void *arg)
             memset(s_avoid, 0, sizeof(s_avoid));
             s_avoided = 0;
             s_target.valid = false;
+            s_feedback = (pose_feedback_t){0};
+            s_pose_sequence = 0;
+            s_good_matches = 0;
+            update_target((uint64_t)(esp_timer_get_time() / 1000), true);
             s_reset = false;
             publish(0);
             ESP_LOGI(TAG, "Karte zurueckgesetzt");
@@ -259,10 +272,14 @@ static void mapper_task(void *arg)
         slam_imu_t imu = imu_input(raw, period_ms);
         bool moving = s_moving;
         int64_t start = esp_timer_get_time();
-        slam_update(&s_slam, scan.distance_mm, SEEKER_LIDAR_FRONT_DEG, SEEKER_LIDAR_CLOCKWISE,
-                    period_ms, (uint64_t)(scan.timestamp_us / 1000), moving, &imu);
+        bool matched = slam_update(&s_slam, scan.distance_mm, SEEKER_LIDAR_FRONT_DEG,
+            SEEKER_LIDAR_CLOCKWISE, period_ms, (uint64_t)(scan.timestamp_us / 1000), moving, &imu);
+        if (!matched) s_good_matches = 0;
+        else if (s_good_matches < RECOVERY_MATCHES) s_good_matches++;
+        s_feedback = (pose_feedback_t){scan.timestamp_us, raw.end, raw.epoch, raw.ok};
+        s_pose_sequence = scan.sequence;
         if (s_rec_active) record(&scan, period_ms, raw, moving);
-        if (s_slam.scans % TARGET_EVERY == 0) update_target((uint64_t)(scan.timestamp_us / 1000));
+        if (s_slam.scans % TARGET_EVERY == 0) update_target((uint64_t)(scan.timestamp_us / 1000), false);
         publish((uint32_t)((esp_timer_get_time() - start) / 1000));
     }
 }

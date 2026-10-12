@@ -114,13 +114,16 @@ int main(void)
     assert(v.free_mm[NAV_CENTER] <= 400 && v.tight_front_mm >= 1890);
 
     /* Fusion fills dropouts from the previous scan but keeps measurements. */
-    uint16_t current[360] = {0}, previous[360], fused[360];
-    for (int i = 0; i < 360; i++) previous[i] = 1500;
+    uint16_t current[360], previous[360], fused[360];
+    for (int i = 0; i < 360; i++) current[i] = previous[i] = 1500;
     current[5] = 300;
+    current[6] = current[20] = current[21] = current[40] = current[0] = 0;
     navigation_fuse(current, previous, fused);
-    assert(fused[5] == 300 && fused[6] == 1500);
+    assert(fused[5] == 300 && fused[6] == 0);   /* an obstacle edge is not an isolated dropout */
+    assert(fused[20] == 0 && fused[21] == 0);   /* missing chunks remain unknown */
+    assert(fused[40] == 1500 && fused[0] == 1500);
     navigation_fuse(current, NULL, fused);
-    assert(fused[5] == 300 && fused[6] == 0);
+    assert(fused[5] == 300 && fused[40] == 0);
     puts("Navigation tests passed: gaps, corridors, robot width, orientation, fusion.");
     return 0;
 }

@@ -17,33 +17,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "ld20_scan.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/** Anzahl der Messpunkte pro Datenpaket. */
-#define LD20_POINTS_PER_PACKET   12
-
-/** Aufloesung des 360-Grad-Scanpuffers (1 Grad pro Sektor). */
-#define LD20_SCAN_SECTORS        360
-
-/** Einzelner Messpunkt. */
-typedef struct {
-    uint16_t distance_mm;   /**< Entfernung in mm, 0 = ungueltig */
-    uint8_t  intensity;     /**< Signalstaerke 0..255            */
-    uint16_t angle_cdeg;    /**< Winkel in 1/100 Grad (0..35999) */
-} ld20_point_t;
-
-/** Kompletter 360-Grad-Scan, auf 1-Grad-Sektoren reduziert. */
-typedef struct {
-    uint16_t distance_mm[LD20_SCAN_SECTORS];
-    uint8_t  intensity[LD20_SCAN_SECTORS];
-    uint16_t speed_rpm;
-    int64_t  timestamp_us;
-    uint32_t sequence;
-    uint16_t valid_sectors;
-} ld20_scan_t;
 
 typedef struct {
     uint32_t rx_bytes;
@@ -54,6 +32,8 @@ typedef struct {
     uint32_t packets;
     uint32_t crc_errors;
     uint32_t scans;
+    uint32_t dropped_scans;
+    uint32_t uart_errors;
 } ld20_stats_t;
 
 ld20_stats_t ld20_lidar_get_stats(void);

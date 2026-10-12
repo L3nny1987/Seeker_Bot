@@ -48,6 +48,7 @@ typedef struct {
     bool was_moving;                             /* motor command of the previous scan */
     unsigned bad_matches, known_cells;
     bool initialized, lost;
+    bool degenerate;                             /* map cannot constrain both translation axes */
     int16_t path[SLAM_PATH_MAX][2];              /* cm, ring buffer */
     uint16_t path_count, path_head;
 } slam_t;

@@ -1,4 +1,5 @@
 #include "ld20_lidar.h"
+#include "ld20_scan_builder.h"
 #include <string.h>
 #include "seeker_pins.h"
 #include "driver/uart.h"
@@ -6,16 +7,14 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 
 static SemaphoreHandle_t s_lock;
 static TaskHandle_t s_task;
-static ld20_scan_t s_scan, s_work;
+static ld20_scan_t s_scan;
+static ld20_scan_builder_t s_builder;
 static ld20_stats_t s_stats;
-static bool s_synced;
-static int s_previous_angle = -1;
-static int64_t s_last_packet;
-
-static uint16_t le16(const uint8_t *p) { return p[0] | ((uint16_t)p[1] << 8); }
+static QueueHandle_t s_uart_events;
 
 static uint8_t crc8(const uint8_t *p, unsigned len)
 {
@@ -30,48 +29,12 @@ static uint8_t crc8(const uint8_t *p, unsigned len)
 
 static void packet(const uint8_t *p, int64_t now)
 {
-    unsigned start = le16(p + 4), end = le16(p + 42);
-    unsigned speed = le16(p + 2); /* degrees/second, NOT RPM */
-    unsigned span = (end + 36000 - start) % 36000;
-    if (start >= 36000 || end >= 36000 || speed < 360 || speed > 7200 || span > 4500) {
-        xSemaphoreTake(s_lock, portMAX_DELAY);
-        s_stats.rejected_packets++;
-        xSemaphoreGive(s_lock);
-        return;
-    }
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    if (s_last_packet && now - s_last_packet > SEEKER_LIDAR_STALE_MS * 1000LL) {
-        memset(&s_work, 0, sizeof(s_work));
-        s_synced = false;
-        s_previous_angle = -1;
-    }
-    s_last_packet = now;
-    s_stats.packets++;
-    for (unsigned i = 0; i < LD20_POINTS_PER_PACKET; i++) {
-        unsigned angle = (start + span * i / (LD20_POINTS_PER_PACKET - 1)) % 36000;
-        if (s_previous_angle > 30000 && angle < 6000) {
-            if (s_synced) {
-                s_work.speed_rpm = speed / 6;
-                s_work.timestamp_us = now;
-                s_work.sequence = s_scan.sequence + 1;
-                s_scan = s_work;
-                s_stats.scans++;
-            }
-            memset(&s_work, 0, sizeof(s_work));
-            s_synced = true;
-        }
-        s_previous_angle = angle;
-        unsigned sector = angle / 100;
-        uint16_t distance = le16(p + 6 + i * 3);
-        uint8_t intensity = p[8 + i * 3];
-        if (distance >= 80 && distance <= 8000 && intensity >= SEEKER_LIDAR_MIN_INTENSITY) {
-            if (!s_work.distance_mm[sector]) s_work.valid_sectors++;
-            if (!s_work.distance_mm[sector] || distance < s_work.distance_mm[sector]) {
-                s_work.distance_mm[sector] = distance;
-                s_work.intensity[sector] = intensity;
-            }
-        }
-    }
+    int result = ld20_scan_builder_packet(&s_builder, p, now, SEEKER_LIDAR_MIN_INTENSITY, &s_scan);
+    if (result < 0) s_stats.rejected_packets++;
+    else s_stats.packets++;
+    if (result > 0) s_stats.scans++;
+    s_stats.dropped_scans = s_builder.dropped_scans;
     xSemaphoreGive(s_lock);
 }
 
@@ -80,7 +43,22 @@ static void receive_task(void *arg)
     (void)arg;
     uint8_t bytes[256], frame[47];
     unsigned used = 0;
+    int64_t last_byte_us = 0;
     while (true) {
+        uart_event_t event;
+        while (xQueueReceive(s_uart_events, &event, 0) == pdTRUE) {
+            if (event.type == UART_FIFO_OVF || event.type == UART_BUFFER_FULL ||
+                event.type == UART_FRAME_ERR || event.type == UART_PARITY_ERR) {
+                uart_flush_input(SEEKER_LIDAR_UART_NUM);
+                xQueueReset(s_uart_events);
+                used = 0;
+                xSemaphoreTake(s_lock, portMAX_DELAY);
+                ld20_scan_builder_reset(&s_builder);
+                s_stats.uart_errors++;
+                s_stats.dropped_scans = s_builder.dropped_scans;
+                xSemaphoreGive(s_lock);
+            }
+        }
         /* Wait for the first byte, then take what is buffered: the scan
            timestamp feeds the gyro fusion, waiting for a full 256-byte block
            delayed it by up to 15 ms. Each frame is back-dated to its last byte. */
@@ -92,6 +70,8 @@ static void receive_task(void *arg)
         int64_t received = esp_timer_get_time();
         const int64_t byte_us = 10000000LL / SEEKER_LIDAR_BAUDRATE;
         if (n > 0) {
+            if (last_byte_us && received - (n - 1) * byte_us - last_byte_us > 20000) used = 0;
+            last_byte_us = received;
             xSemaphoreTake(s_lock, portMAX_DELAY);
             s_stats.rx_bytes += n;
             s_stats.sample_len = n < (int)sizeof(s_stats.sample) ? n : sizeof(s_stats.sample);
@@ -115,6 +95,8 @@ static void receive_task(void *arg)
             else {
                 xSemaphoreTake(s_lock, portMAX_DELAY);
                 s_stats.crc_errors++;
+                ld20_scan_builder_reset(&s_builder);
+                s_stats.dropped_scans = s_builder.dropped_scans;
                 xSemaphoreGive(s_lock);
                 unsigned offset = 1;
                 while (offset < used && !(frame[offset] == 0x54 &&
@@ -138,8 +120,9 @@ esp_err_t ld20_lidar_init(void)
     esp_err_t err = uart_param_config(SEEKER_LIDAR_UART_NUM, &config);
     if (err == ESP_OK) err = uart_set_pin(SEEKER_LIDAR_UART_NUM, SEEKER_PIN_LIDAR_TX,
                                          SEEKER_PIN_LIDAR_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    if (err == ESP_OK) err = uart_driver_install(SEEKER_LIDAR_UART_NUM, 4096, 0, 0, NULL, 0);
+    if (err == ESP_OK) err = uart_driver_install(SEEKER_LIDAR_UART_NUM, 4096, 0, 16, &s_uart_events, 0);
     if (err != ESP_OK) return err;
+    ld20_scan_builder_reset(&s_builder);
     if (xTaskCreate(receive_task, "lidar_rx", 4096, NULL, 7, &s_task) != pdPASS) {
         uart_driver_delete(SEEKER_LIDAR_UART_NUM);
         return ESP_ERR_NO_MEM;

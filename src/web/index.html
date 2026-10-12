@@ -449,7 +449,7 @@ Object.assign(reasonText,{auto_ready:'Auto gestartet',map_reset:'Karte zurückge
  goal_localization_wait:'Ziel: warte auf gültige SLAM-Position',
  path_follow:'Kartenpfad: fahre zum nächsten Wegpunkt',path_turn:'Kartenpfad: drehe zum Wegpunkt',path_avoid:'Kartenpfad: weiche Hindernis aus',
  explore_follow:'Erkunden: fahre gerade zum Ziel',explore_turn:'Erkunden: drehe zum Ziel',explore_avoid:'Erkunden: weiche Hindernis aus',
- slam_wait:'Karte stabilisieren: kurz stillstehen',
+ slam_wait:'Warte auf zuverlässige Lokalisierung',
  path_planning:'Kartenpfad: berechne Weg …',path_unreachable:'Kartenpfad: kein Weg zum Ziel in der Karte',path_localization_wait:'Kartenpfad: warte auf gültige SLAM-Position'});
 const strategyNames={explore:'Erkunden',wall_left:'Wand links',wall_right:'Wand rechts',goal:'Ziel (Bug2)',path:'Ziel (Kartenpfad)'};
 const MAP_COLORS=[[11,20,32],[30,58,77],[110,128,146],[231,238,248]];
@@ -540,7 +540,7 @@ function mapTelemetry(s){
  $('pose-heading').textContent=s.poseValid?Math.round(s.poseDeg)+'°':'—';
  $('area').textContent=s.mapAreaM2!==undefined?s.mapAreaM2.toFixed(1)+' m²':'—';
  $('quality').textContent=s.slamQuality!==undefined?Math.round(s.slamQuality*100)+' %':'—';
- $('map-state').textContent=s.slamLost?'LOKALISIERUNG VERLOREN':s.poseValid?'SLAM AKTIV · '+(s.slamUpdateMs??'—')+' ms':'WARTE AUF SCAN';
+ $('map-state').textContent=s.slamLost?'LOKALISIERUNG VERLOREN':s.slamDegenerate?'POSITION NICHT EINDEUTIG':s.slamWeak?'LOKALISIERUNG PRÜFEN':s.poseValid?'SLAM AKTIV · '+(s.slamUpdateMs??'—')+' ms':'WARTE AUF SCAN';
  $('map-reset').disabled=!token||s.mode==='auto';
  if(s.imuPresent!==undefined)$('imu-info').textContent='Kreisel: '+(!s.imuPresent?'MPU6050 nicht gefunden – nur LIDAR':s.imuCalibrating?'kalibriert … Roboter still halten':!s.imuReady?'wartet auf 2 s Stillstand zur Kalibrierung':(s.slamImu?'aktiv':'bereit')+' · '+s.imuRateDps.toFixed(0)+' °/s · Kurs ±'+s.headingSigmaDeg.toFixed(1)+'° · Neigung '+s.imuTiltDeg.toFixed(0)+'° · '+s.imuHz+' Hz'+(s.imuErrors?' · Fehler '+s.imuErrors:''));
  if(s.mode==='auto')$('auto-readiness').textContent+=' · '+(strategyNames[s.strategy]||s.strategy)+' / '+s.navDetail+(s.goalSet?' · Ziel '+(s.goalX/1000).toFixed(2)+' / '+(s.goalY/1000).toFixed(2)+' m':'')+(s.wallLeftMm||s.wallRightMm?' · Wand L '+mm(s.wallLeftMm)+' R '+mm(s.wallRightMm):'')+(s.exploreTarget?(s.strategy==='path'?' · Kartenpfad '+(s.exploreSteps*0.2).toFixed(1)+' m'+(s.exploreFrontier?' (teils unbekannt)':''):' · Erkundungsziel '+(s.exploreFrontier?'Neuland':'Wiederbesuch')+(s.exploreAvoided?' · gesperrt '+s.exploreAvoided:'')):'');
