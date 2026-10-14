@@ -9,10 +9,12 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
 
 #define DIAG_MAGIC   0x5342474Cu
+#define ALLOC_MAGIC  0x5342414Cu
 #define LOG_SIZE     3072
 #define HISTORY      8
 #define REASONS      16
@@ -33,6 +35,9 @@ typedef struct {
     int8_t mode, drive, turn, online;
     char log[LOG_SIZE];
     uint32_t magic_end;
+    /* Appended: older firmware's RTC log layout remains readable. */
+    uint32_t alloc_magic;
+    diag_memory_t memory;
 } rtc_diag_t;
 
 static RTC_NOINIT_ATTR rtc_diag_t s_rtc;
@@ -43,6 +48,28 @@ static size_t s_prev_len;
 static uint32_t s_boots;
 static uint16_t s_counts[REASONS];
 static diag_entry_t s_history[HISTORY];      /* newest first */
+static diag_memory_t s_previous_memory;
+
+/* The allocator may fail in low-level code. Do not log, allocate, inspect
+   heaps or dereference flash strings here. Record a small RTC snapshot only. */
+static void IRAM_ATTR allocation_failed(size_t size, uint32_t caps, const char *function_name)
+{
+    (void)function_name;
+    portENTER_CRITICAL_SAFE(&s_mux);
+    s_rtc.memory.failures++;
+    s_rtc.memory.size = (uint32_t)size;
+    s_rtc.memory.caps = caps;
+    s_rtc.memory.uptime_ms = s_rtc.uptime_ms;
+    portEXIT_CRITICAL_SAFE(&s_mux);
+}
+
+diag_memory_t diag_memory_status(void)
+{
+    taskENTER_CRITICAL(&s_mux);
+    diag_memory_t memory = s_rtc.memory;
+    taskEXIT_CRITICAL(&s_mux);
+    return memory;
+}
 
 static size_t linearize(char *out, size_t size)
 {
@@ -99,6 +126,7 @@ void diag_init(void)
                 s_rtc.head < LOG_SIZE && reason != ESP_RST_POWERON;
     diag_entry_t entry = { .reason = (uint8_t)reason };
     if (have) {
+        if (s_rtc.alloc_magic == ALLOC_MAGIC) s_previous_memory = s_rtc.memory;
         s_prev_len = linearize(s_prev_log, sizeof(s_prev_log));
         entry.valid = 1;
         entry.uptime_s = s_rtc.uptime_ms / 1000;
@@ -110,6 +138,7 @@ void diag_init(void)
     }
     memset(&s_rtc, 0, sizeof(s_rtc));
     s_rtc.magic = s_rtc.magic_end = DIAG_MAGIC;
+    s_rtc.alloc_magic = ALLOC_MAGIC;
 
     nvs_handle_t handle;
     if (nvs_open(NVS_NS, NVS_READONLY, &handle) == ESP_OK) {
@@ -128,6 +157,7 @@ void diag_init(void)
     s_history[0] = entry;
     save();
     s_original = esp_log_set_vprintf(log_hook);
+    ESP_ERROR_CHECK(heap_caps_register_failed_alloc_callback(allocation_failed));
 }
 
 void diag_snapshot(int mode, int drive, int turn, bool online)
@@ -160,6 +190,16 @@ size_t diag_summary(char *out, size_t size)
         else
             ADD("kein Zustand (Strom war ganz weg oder Start ohne Log)\n");
     }
+    diag_memory_t memory = diag_memory_status();
+    ADD("\nSpeicherreservierungen fehlgeschlagen: aktuell %lu, vor letztem Reset %lu\n",
+        (unsigned long)memory.failures, (unsigned long)s_previous_memory.failures);
+    if (memory.failures)
+        ADD("  Letzter Fehler: %lu Bytes, caps 0x%08lX, bei %lu ms\n",
+            (unsigned long)memory.size, (unsigned long)memory.caps, (unsigned long)memory.uptime_ms);
+    if (s_previous_memory.failures)
+        ADD("  Vor Reset: %lu Bytes, caps 0x%08lX, bei %lu ms\n",
+            (unsigned long)s_previous_memory.size, (unsigned long)s_previous_memory.caps,
+            (unsigned long)s_previous_memory.uptime_ms);
 #undef ADD
     return n;
 }

@@ -205,7 +205,7 @@ footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-si
 'use strict';
 const $=id=>document.getElementById(id);
 let token=0,sequence=0,state=null,online=false,axes={drive:0,turn:0},queue=Promise.resolve(),pumpBusy=false,scanData=null,lastReason='',pointer=null;
-let statusFailures=0,lastUptime=0,linkLost=false;
+let statusFailures=0,lastUptime=0,linkLost=false,pollBusy=false;
 const keys=new Set();
 const autoHelp=document.createElement('p');autoHelp.className='small muted';autoHelp.textContent='Auto: Steuerung übernehmen → Bewegung stoppen (IDLE) → Parameter einstellen/übernehmen → Prüfhaken setzen → Inbetriebnahme bestätigen → Autonom. Der Roboter fährt in Richtung des freiesten Korridors (Roboterbreite berücksichtigt), lenkt proportional und bevorzugt noch unkartierte Bereiche. Wandfolgen regelt den Seitenabstand anhand einer aus dem LIDAR geschätzten Wandlinie. Ziel/Startpunkt: Bug2 – Linie zum Ziel folgen, Hindernisse umfahren, Linie wieder aufnehmen. Bei Hindernis oder Feststecken: zur freien Lücke drehen, sonst bei freiem Heck zurücksetzen. Nach 4 Versuchen \u201eZappeln\u201c: kurze Stöße rückwärts/drehen/vorwärts mit knappen Körperabständen und Mindestleistung; erst danach kurze Pause und neuer Versuch. Erkunden fährt gezielt zur nächsten erreichbaren unbekannten Kartenstelle (Frontier); nicht erreichbare Ziele werden gesperrt. Bei kurzem WLAN-Aussetzer hält er an und fährt weiter, sobald die Verbindung zurück ist. Nur unter Aufsicht.';
 const helpBox=document.createElement('details');helpBox.className='help';const helpTitle=document.createElement('summary');helpTitle.textContent='So arbeitet der Autonom-Modus';helpBox.append(helpTitle,autoHelp);document.querySelector('.commission').append(helpBox);
@@ -363,9 +363,13 @@ async function pump(){
 function mm(value){return value?(value/1000).toFixed(2)+' m':'—';}
 async function poll(){
 	if(document.hidden||otaRunning){setTimeout(poll,1000);return;}
+	if(pollBusy)return;
+	pollBusy=true;
 	const started=performance.now();
+	const radarVisible=!$('tab-fahren').hidden;
 	try{
-		state=await request('/api/telemetry');
+		/* Hidden radar needs no 360-point scan stream. Control cadence is independent. */
+		state=await request(radarVisible?'/api/telemetry':'/api/status');
 		if(lastUptime&&state.uptime<lastUptime){zero();token=0;settingsLoaded=false;log('ESP32 neu gestartet.');}
 		lastUptime=state.uptime;statusFailures=0;online=true;
 		if(token&&state.controller===false){zero();token=0;log('ESP32 hat die Steuerung freigegeben: '+state.reason);}
@@ -388,6 +392,7 @@ async function poll(){
 		$('crc').textContent=state.crcErrors;$('uptime').textContent=state.uptime+' s';
 		const resetLabels={power_on:'Einschalten (auch kompletter Spannungsausfall möglich)',brownout:'Unterspannung / Brownout',panic:'Software-Panic',software_reset:'Software-Neustart',task_watchdog:'Task-Watchdog',interrupt_watchdog:'Interrupt-Watchdog',watchdog:'Watchdog',external_reset:'Externer Reset'};
 		$('reset-info').textContent='Letzter Neustart: '+(resetLabels[state.resetReasonText]||state.resetReasonText||state.resetReason)+' · WLAN '+(state.wifiRssi??'—')+' dBm'+(state.wifiDisconnects!==undefined?' · Abbrüche '+state.wifiDisconnects+(state.wifiDisconnects?' (Grund '+state.wifiLastReason+', '+(state.wifiLastOutageMs/1000).toFixed(1)+' s weg)':'')+' · verbunden seit '+state.wifiConnectedS+' s · HTTP-Clients '+state.httpClients:'');
+		if(state.minHeap!==undefined)$('reset-info').textContent+=' · RAM-Minimum '+Math.round(state.minHeap/1024)+' kB'+(state.heapLargest!==undefined?' · größter Block '+Math.round(state.heapLargest/1024)+' kB':'')+(state.allocFailures?' · Speicherfehler '+state.allocFailures:'');
 		$('owner').textContent=(token?'Dieses Gerät':state.controller?'Belegt':'Frei')+(state.heartbeatAgeMs!==undefined&&state.heartbeatAgeMs!==4294967295?' · Heartbeat '+state.heartbeatAgeMs+' ms':'');
 		$('version').textContent='v'+state.version;$('speed').max=state.manualLimit;
 		$('scan-state').textContent=state.lidarHealthy?'LIVE SCAN':'SCAN NICHT BEREIT';
@@ -408,12 +413,13 @@ async function poll(){
 		scanData=null;
 		/* Telemetry timeout is not proof of a lost control lease. The
 		   control pump independently validates it; never resume movement. */
-	}
+	}finally{pollBusy=false;}
 	refreshControls();
-	/* Single-flight 5 Hz telemetry; independent 100 ms control heartbeat.
-	   Never pause the radar during movement or stack slow requests. */
+	/* Visible radar remains 5 Hz; other views use small status frames at 2 Hz.
+	   After failures, back off telemetry without slowing the control pump. */
 	draw();
-	setTimeout(poll,Math.max(50,200-(performance.now()-started)));
+	const period=statusFailures?Math.min(3000,500*2**Math.min(statusFailures,3)):radarVisible?200:500;
+	setTimeout(poll,Math.max(50,period-(performance.now()-started)));
 }
 function draw(){const canvas=$('radar'),rect=canvas.getBoundingClientRect(),ratio=devicePixelRatio||1;
  canvas.width=rect.width*ratio;canvas.height=rect.height*ratio;
@@ -453,17 +459,26 @@ Object.assign(reasonText,{auto_ready:'Auto gestartet',map_reset:'Karte zurückge
  path_planning:'Kartenpfad: berechne Weg …',path_unreachable:'Kartenpfad: kein Weg zum Ziel in der Karte',path_localization_wait:'Kartenpfad: warte auf gültige SLAM-Position'});
 const strategyNames={explore:'Erkunden',wall_left:'Wand links',wall_right:'Wand rechts',goal:'Ziel (Bug2)',path:'Ziel (Kartenpfad)'};
 const MAP_COLORS=[[11,20,32],[30,58,77],[110,128,146],[231,238,248]];
-let mapData=null,mapImage=null,mapView=null,goal=null,mapBusy=false;
+let mapData=null,mapImage=null,mapView=null,goal=null,mapBusy=false,mapRetryMs=3000;
 function parseMap(buffer){
  const v=new DataView(buffer);
  if(buffer.byteLength<40||String.fromCharCode(v.getUint8(0),v.getUint8(1),v.getUint8(2),v.getUint8(3))!=='SMAP')throw new Error('Ungültige Kartendaten');
- const n=v.getUint16(6,true),res=v.getUint16(8,true),count=v.getUint16(10,true),flags=v.getUint8(5),bytes=n*n/4;
- if(buffer.byteLength<40+bytes+count*4)throw new Error('Karte unvollständig');
+ const version=v.getUint8(4),n=v.getUint16(6,true),res=v.getUint16(8,true),count=v.getUint16(10,true),flags=v.getUint8(5),bytes=n*n/4;
+ if((version!==1&&version!==2)||!n||n>512||n%2||!res||count>1024)throw new Error('Ungültiges Kartenformat');
+ const encoded=version===2?v.getUint16(34,true):bytes;
+ if(buffer.byteLength!==40+encoded+count*4)throw new Error('Karte unvollständig');
+ let cells;
+ if(version===2){
+  if(!encoded||encoded%2)throw new Error('Ungültige Kartenkompression');
+  cells=new Uint8Array(bytes);let used=0;
+  for(let o=40;o<40+encoded;o+=2){const run=v.getUint8(o);if(!run||used+run>bytes)throw new Error('Ungültige Kartenkompression');cells.fill(v.getUint8(o+1),used,used+run);used+=run;}
+  if(used!==bytes)throw new Error('Karte unvollständig');
+ }else cells=new Uint8Array(buffer,40,bytes);
  const path=[];
- for(let i=0;i<count;i++){const o=40+bytes+i*4;path.push([v.getInt16(o,true)*10,v.getInt16(o+2,true)*10]);}
+ for(let i=0;i<count;i++){const o=40+encoded+i*4;path.push([v.getInt16(o,true)*10,v.getInt16(o+2,true)*10]);}
  return {n,res,poseValid:!!(flags&1),lost:!!(flags&2),goalSet:!!(flags&4),x:v.getFloat32(12,true),y:v.getFloat32(16,true),
   theta:v.getFloat32(20,true),goalX:v.getFloat32(24,true),goalY:v.getFloat32(28,true),quality:v.getUint8(32),
-  integrated:v.getUint32(36,true),cells:new Uint8Array(buffer,40,bytes),path};
+  integrated:v.getUint32(36,true),cells,path};
 }
 function toCell(m,x,y){return {col:m.n-1-(y/m.res+m.n/2),row:m.n-1-(x/m.res+m.n/2)};}
 function buildImage(m){
@@ -523,17 +538,18 @@ function drawMap(){
  mapView=renderMap(ctx,mapData,rect.width,rect.height,viewport(mapData,6));
 }
 async function mapLoop(){
- if(!document.hidden&&!mapBusy&&!otaRunning){
+ /* Large map transfers only while the map is actually on screen. */
+ if(!document.hidden&&!$('tab-karte').hidden&&online&&!mapBusy&&!otaRunning){
   mapBusy=true;
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),3000);
   try{
-   const response=await fetch('/api/map',{cache:'no-store',signal:controller.signal});
+   const response=await fetch('/api/map?rle=1',{cache:'no-store',signal:controller.signal});
    if(!response.ok)throw new Error('HTTP '+response.status);
-   mapData=parseMap(await response.arrayBuffer());mapImage=buildImage(mapData);drawMap();
-  }catch(e){if(!online)$('map-state').textContent='KARTE OFFLINE';}
+   mapData=parseMap(await response.arrayBuffer());mapImage=buildImage(mapData);drawMap();mapRetryMs=3000;
+  }catch(e){mapRetryMs=Math.min(15000,mapRetryMs*2);if(!online)$('map-state').textContent='KARTE OFFLINE';}
   finally{clearTimeout(timer);mapBusy=false;}
  }
- setTimeout(mapLoop,1500);
+ setTimeout(mapLoop,mapRetryMs);
 }
 function mapTelemetry(s){
  $('pose').textContent=s.poseValid?(s.poseX/1000).toFixed(1)+' / '+(s.poseY/1000).toFixed(1):'—';

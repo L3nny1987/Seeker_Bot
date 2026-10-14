@@ -9,6 +9,7 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)[1]
 const nodes = new Map(), timers = [], requests = [];
 let failure = false;
 let failOnce=false,reject=false;
+let mapStatus=200,holdTelemetry=false,releaseTelemetry;
 const scan = {fresh: true, rpm: 600, sequence: 41, distance: Array(360).fill(2000)};
 const status = {mode: 'manual', lidarHealthy: true, scan, uptime: 12,
   scanAgeMs: 20, coverage: 360, drive: 25, turn: 0, heap: 190000,
@@ -21,7 +22,8 @@ status.settings={manualStopMm:200,manualRotateMm:200,autoStopMm:500,autoRotateMm
 function node(id) {
   if (!nodes.has(id)) nodes.set(id, {value: '30', style: {}, children: [],
     classList: {add() {}, remove() {}, toggle() {}}, addEventListener() {},
-    prepend() {}, before() {}, append() {}, reportValidity: () => true, textContent: ''});
+    prepend() {}, before() {}, append() {}, reportValidity: () => true, textContent: '',
+    getBoundingClientRect: () => ({width:0,height:0})});
   return nodes.get(id);
 }
 const context = vm.createContext({
@@ -36,7 +38,13 @@ const context = vm.createContext({
     if(failOnce){failOnce=false;throw new Error('temporary transport failure');}
     if(reject)return {ok:false,status:409};
     if (failure) throw new Error('test timeout');
-    return {ok: true, json: async () => path === '/api/telemetry' ? status : {ok: true}};
+    if(holdTelemetry&&path.startsWith('/api/telemetry'))await new Promise(resolve=>{releaseTelemetry=resolve;});
+    if(path.startsWith('/api/map')){
+      const b=new ArrayBuffer(56),v=new DataView(b);
+      [...'SMAP'].forEach((c,i)=>v.setUint8(i,c.charCodeAt(0)));v.setUint8(4,1);v.setUint16(6,8,true);v.setUint16(8,50,true);
+      return {ok:mapStatus===200,status:mapStatus,arrayBuffer:async()=>b};
+    }
+    return {ok: true, json: async () => path === '/api/telemetry'||path==='/api/status' ? status : {ok: true}};
   },
 });
 vm.runInContext(script, context);
@@ -105,5 +113,42 @@ vm.runInContext('draw=()=>{}; token=123; online=true; state={mode:"manual"}; axe
   vm.runInContext('token=123;',context);status.controller=false;status.reason='controller_timeout';
   await vm.runInContext('poll()',context);
   assert.equal(vm.runInContext('token',context),0,'Confirmed server lease loss clears local ownership');
-  console.log('Telemetry tests passed: 5 Hz, scans during movement, separate control cadence, fail-safe timeout.');
+
+  node('tab-fahren').hidden=true;
+  await vm.runInContext('poll()',context);
+  assert.equal(requests.at(-1).path,'/api/status','Hidden radar uses lightweight status');
+  assert.ok(timers.some(t=>t.ms===500),'Hidden radar polls at 2 Hz');
+  node('tab-fahren').hidden=false;
+  holdTelemetry=true;
+  const pending=vm.runInContext('poll()',context), flightCount=requests.length;
+  await vm.runInContext('poll()',context);
+  assert.equal(requests.length,flightCount,'Slow telemetry must not overlap');
+  holdTelemetry=false;releaseTelemetry();await pending;
+  failure=true;
+  await vm.runInContext('poll()',context);
+  assert.ok(timers.some(t=>t.ms===1000),'Transport failure backs off telemetry');
+  failure=false;
+
+  const mapScript=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][1][1]
+    .replace("window.addEventListener('resize',drawMap);drawMap();mapLoop();",'');
+  vm.runInContext(mapScript,context);
+  vm.runInContext('drawMap=()=>{};buildImage=()=>({});online=true;',context);
+  node('tab-karte').hidden=true;
+  let beforeMap=requests.length;
+  await vm.runInContext('mapLoop()',context);
+  assert.equal(requests.length,beforeMap,'Hidden map must not fetch any map data');
+  node('tab-karte').hidden=false;
+  await vm.runInContext('mapLoop()',context);
+  assert.equal(requests.at(-1).path,'/api/map?rle=1','Visible map requests bounded compression');
+  mapStatus=503;
+  await vm.runInContext('mapLoop()',context);
+  assert.equal(vm.runInContext('mapRetryMs',context),6000,'Low-memory response backs off large transfers');
+  assert.equal(vm.runInContext('mapBusy',context),false);
+  mapStatus=200;
+  await vm.runInContext('mapLoop()',context);
+  assert.equal(vm.runInContext('mapRetryMs',context),3000);
+  vm.runInContext('online=false;',context);beforeMap=requests.length;
+  await vm.runInContext('mapLoop()',context);
+  assert.equal(requests.length,beforeMap,'Offline map must not create additional load');
+  console.log('Telemetry tests passed: visible radar 5 Hz, hidden status 2 Hz, no hidden map traffic, backoff, single-flight, unchanged control cadence.');
 })().catch(error => {console.error(error); process.exitCode = 1;});

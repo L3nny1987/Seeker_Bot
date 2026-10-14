@@ -20,12 +20,15 @@
 #include "diag.h"
 #include "imu.h"
 #include "network.h"
+#include "network_limits.h"
+#include "map_transport.h"
 #include "esp_app_desc.h"
 #include "esp_app_format.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_heap_caps.h"
 
 #define OTA_CHUNK    4096
 #define OTA_RETRIES  4                  /* recv timeouts (1 s each) per block */
@@ -33,6 +36,7 @@
 
 static const char *TAG = "web";
 static httpd_handle_t s_server;
+static uint32_t s_bulk_pauses, s_bulk_errors;
 
 /* The HTTP server runs all handlers on one task, so a single static buffer
    is safe and avoids hundreds of heap allocations per telemetry frame. */
@@ -100,6 +104,32 @@ static esp_err_t socket_open(httpd_handle_t server, int socket)
            ? ESP_OK : ESP_FAIL;
 }
 
+_Static_assert(CONFIG_LWIP_TCP_SND_BUF_DEFAULT <= SEEKER_TCP_WINDOW_BYTES &&
+               CONFIG_LWIP_TCP_WND_DEFAULT <= SEEKER_TCP_WINDOW_BYTES,
+               "Apply the bounded TCP windows from sdkconfig.defaults to the existing sdkconfig");
+
+static bool bulk_allowed(void)
+{
+    return heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) >= SEEKER_BULK_HEAP_RESERVE;
+}
+
+static esp_err_t bulk_unavailable(httpd_req_t *req)
+{
+    s_bulk_pauses++;
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_hdr(req, "Retry-After", "3");
+    return httpd_resp_send(req, "Network memory busy; retry shortly", HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t bulk_chunk(httpd_req_t *req, const void *data, size_t size, int64_t deadline)
+{
+    if (!bulk_allowed()) { s_bulk_pauses++; return ESP_ERR_TIMEOUT; }
+    if (esp_timer_get_time() >= deadline) { s_bulk_errors++; return ESP_ERR_TIMEOUT; }
+    esp_err_t err = httpd_resp_send_chunk(req, data, size);
+    if (err != ESP_OK) s_bulk_errors++;
+    return err;
+}
+
 static void headers(httpd_req_t *req)
 {
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -129,15 +159,17 @@ static esp_err_t text_reply(httpd_req_t *req, const char *status, const char *js
 static esp_err_t index_handler(httpd_req_t *req)
 {
     headers(req);
+    if (!bulk_allowed()) return bulk_unavailable(req);
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     httpd_resp_set_hdr(req, "Vary", "Accept-Encoding");
     /* The uncompressed CSS/HTML previously exceeded the small TCP send
        window on a weak Wi-Fi link. Stream a compact asset in bounded chunks. */
+    int64_t deadline = esp_timer_get_time() + 3000000;
     for (size_t offset = 0; offset < sizeof(dashboard_gzip); offset += 1024) {
         size_t count = sizeof(dashboard_gzip) - offset;
         if (count > 1024) count = 1024;
-        esp_err_t err = httpd_resp_send_chunk(req, (const char *)dashboard_gzip + offset, count);
+        esp_err_t err = bulk_chunk(req, dashboard_gzip + offset, count, deadline);
         if (err != ESP_OK) return err;
     }
     return httpd_resp_send_chunk(req, NULL, 0);
@@ -224,6 +256,14 @@ static esp_err_t status_handler(httpd_req_t *req)
         (unsigned long)esp_get_free_heap_size(), (unsigned long)esp_get_minimum_free_heap_size(),
         (long long)(esp_timer_get_time() / 1000000), (int)esp_reset_reason(),
         seeker_reset_name(esp_reset_reason()));
+    diag_memory_t memory = diag_memory_status();
+    put(&w, "\"heapInternal\":%lu,\"heapLargest\":%lu,\"allocFailures\":%lu,"
+        "\"lastAllocBytes\":%lu,\"lastAllocMs\":%lu,\"bulkPaused\":%s,"
+        "\"bulkPauses\":%lu,\"bulkErrors\":%lu,",
+        (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+        (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+        (unsigned long)memory.failures, (unsigned long)memory.size, (unsigned long)memory.uptime_ms,
+        json_bool(!bulk_allowed()), (unsigned long)s_bulk_pauses, (unsigned long)s_bulk_errors);
     wifi_ap_record_t ap;
     if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) put(&w, "\"wifiRssi\":%d,", ap.rssi);
     network_stats_t net = seeker_network_stats();
@@ -276,6 +316,8 @@ static void putf(uint8_t *p, float v) { uint32_t u; memcpy(&u, &v, 4); put32(p, 
    the path as int16 cm (x, y) pairs. Streamed in bounded chunks. */
 static esp_err_t map_handler(httpd_req_t *req)
 {
+    headers(req);
+    if (!bulk_allowed()) return bulk_unavailable(req);
     static int16_t path[SLAM_PATH_MAX][2];
     robot_status_t s = robot_manager_status();
     uint16_t count = mapper_path(path, SLAM_PATH_MAX);
@@ -295,31 +337,45 @@ static esp_err_t map_handler(httpd_req_t *req)
     chunk[32] = (uint8_t)(quality < 0 ? 0 : quality > 100 ? 100 : quality);
     chunk[33] = 0;
     put32(chunk + 36, s.map.integrated);
-    headers(req);
-    httpd_resp_set_type(req, "application/octet-stream");
-    size_t used = 40;
+    /* New clients opt in; older dashboards still receive the v1 layout. */
+    char query[32], encoding[8];
+    size_t encoded = 0;
     const int8_t *grid = mapper_grid();
-    for (unsigned i = 0; i < SLAM_SIZE * SLAM_SIZE; i += 4) {
-        chunk[used++] = slam_cell_class(grid[i]) | slam_cell_class(grid[i + 1]) << 2 |
-                        slam_cell_class(grid[i + 2]) << 4 | slam_cell_class(grid[i + 3]) << 6;
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "rle", encoding, sizeof(encoding)) == ESP_OK && !strcmp(encoding, "1")) {
+        encoded = map_transport_rle(grid, SLAM_SIZE * SLAM_SIZE, (uint8_t *)s_json, sizeof(s_json));
+        if (encoded) { chunk[4] = 2; put16(chunk + 34, (uint16_t)encoded); }
+    }
+    httpd_resp_set_type(req, "application/octet-stream");
+    int64_t deadline = esp_timer_get_time() + SEEKER_BULK_MAX_US;
+    size_t used = 40;
+    size_t bytes = encoded ? encoded : SLAM_SIZE * SLAM_SIZE / 4;
+    for (size_t i = 0; i < bytes; i++) {
+        chunk[used++] = encoded ? (uint8_t)s_json[i] : map_transport_byte(grid, i * 4);
         if (used == sizeof(chunk)) {
-            esp_err_t err = httpd_resp_send_chunk(req, (const char *)chunk, used);
+            esp_err_t err = bulk_chunk(req, chunk, used, deadline);
             if (err != ESP_OK) return err;
             used = 0;
         }
     }
     for (uint16_t i = 0; i < count; i++) {
+        /* RLE lengths are even, not necessarily a multiple of four. */
+        if (used + 4 > sizeof(chunk)) {
+            esp_err_t err = bulk_chunk(req, chunk, used, deadline);
+            if (err != ESP_OK) return err;
+            used = 0;
+        }
         put16(chunk + used, (uint16_t)path[i][0]);
         put16(chunk + used + 2, (uint16_t)path[i][1]);
         used += 4;
         if (used == sizeof(chunk)) {
-            esp_err_t err = httpd_resp_send_chunk(req, (const char *)chunk, used);
+            esp_err_t err = bulk_chunk(req, chunk, used, deadline);
             if (err != ESP_OK) return err;
             used = 0;
         }
     }
     if (used) {
-        esp_err_t err = httpd_resp_send_chunk(req, (const char *)chunk, used);
+        esp_err_t err = bulk_chunk(req, chunk, used, deadline);
         if (err != ESP_OK) return err;
     }
     return httpd_resp_send_chunk(req, NULL, 0);
@@ -664,14 +720,18 @@ esp_err_t seeker_web_start(void)
     if (s_server) return ESP_OK;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
-    config.max_open_sockets = 6;
+    config.max_open_sockets = SEEKER_HTTP_CLIENTS;
     config.max_uri_handlers = 12;
     config.lru_purge_enable = true;
     config.open_fn = socket_open;
     config.recv_wait_timeout = 1;
     /* The server is single-threaded: a stalled send must not block the
        heartbeats of the controller for long. Motor deadman stays 350 ms. */
-    config.send_wait_timeout = 2;
+    config.send_wait_timeout = 1;
+    config.keep_alive_enable = true;
+    config.keep_alive_idle = 5;
+    config.keep_alive_interval = 2;
+    config.keep_alive_count = 2;
     esp_err_t err = httpd_start(&s_server, &config);
     if (err != ESP_OK) return err;
     const httpd_uri_t routes[] = {

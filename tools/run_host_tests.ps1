@@ -14,6 +14,7 @@ try {
         @('navigation_feedback_test', 'src/navigation.c'),
         @('motion_settings_test', ''),
         @('pose_feedback_test', ''),
+        @('map_transport_test', ''),
         @('ld20_scan_test', 'components/ld20_lidar/ld20_scan_builder.c'),
         @('slam_test', 'src/slam.c')
     )

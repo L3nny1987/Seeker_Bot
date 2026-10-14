@@ -2,6 +2,7 @@
 #include "credentials.h"
 #include "robot_manager.h"
 #include "web_server.h"
+#include "network_limits.h"
 #include <string.h>
 #include "esp_event.h"
 #include "esp_log.h"
@@ -153,6 +154,11 @@ esp_err_t seeker_network_init(void)
     s_events = xEventGroupCreate();
     if (!s_events) return ESP_ERR_NO_MEM;
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
+    /* Apply at runtime too: existing sdkconfig files otherwise keep the old
+       32/32 dynamic buffers when only sdkconfig.defaults is edited. */
+    init.static_rx_buf_num = SEEKER_WIFI_STATIC_RX_BUFFERS;
+    init.dynamic_rx_buf_num = SEEKER_WIFI_DYNAMIC_RX_BUFFERS;
+    init.dynamic_tx_buf_num = SEEKER_WIFI_DYNAMIC_TX_BUFFERS;
     ESP_ERROR_CHECK(esp_wifi_init(&init));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, event, NULL));
