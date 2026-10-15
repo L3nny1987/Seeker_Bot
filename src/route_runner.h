@@ -9,7 +9,6 @@
 #define ROUTE_APPROACH_MM 300.0f        /* above NAV_GOAL_RADIUS_MM: the runner sees arrival first */
 #define ROUTE_MAX_DEVIATION_MM 600.0f   /* room for obstacle avoidance beside the edge */
 #define ROUTE_PROGRESS_TIMEOUT_MS 45000
-#define ROUTE_CORRIDOR_MARGIN_MM 50     /* beyond the body half width */
 #define ROUTE_PACKET_HEADER 32
 #define ROUTE_PACKET_MAX (ROUTE_PACKET_HEADER + ROUTE_MAX_POINTS * 4)
 
@@ -42,8 +41,8 @@ const char *route_definition_error(const route_definition_t *definition);
 /* Compact upload avoids a large cJSON tree. All multibyte fields little-endian. */
 bool route_packet_decode(const uint8_t *data, unsigned size, route_definition_t *definition,
                          uint32_t *token, uint32_t *sequence);
-/* NULL when every edge runs through known free cells and no mapped obstacle lies
-   within radius_mm of it; otherwise "route_unexplored" or "route_obstacle". */
+/* NULL when every edge runs through known free cells and no mapped obstacle cell
+   comes closer than radius_mm to it; otherwise "route_unexplored" or "route_obstacle". */
 const char *route_grid_error(const route_definition_t *definition, const int8_t *grid,
                              unsigned size, unsigned resolution_mm, unsigned radius_mm);
 void route_runner_clear(route_runner_t *runner);

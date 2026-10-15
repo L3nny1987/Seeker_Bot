@@ -33,6 +33,50 @@ static void approach(route_runner_t *s, const route_definition_t *d)
     assert(!s->approaching && s->target == 1 && s->completed == 0);
 }
 
+static uint32_t rng = 2463534242u;
+static int rnd(int lo, int hi) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return lo + (int)(rng % (uint32_t)(hi - lo + 1)); }
+
+/* Random map + random loops with the firmware verdict, replayed by routes_ui_test.js:
+   the dashboard check must decide exactly like route_grid_error(). */
+static void corridor_fixture(void)
+{
+    enum { N = 128, RES = 50, RADIUS = 100 };
+    static int8_t grid[N * N];
+    static const int8_t logodds[4] = {0, -20, 20, 40};
+    uint8_t classes[N * N / 4] = {0};
+    for (int gy = 0; gy < N; gy++)
+        for (int gx = 0; gx < N; gx++) {
+            int x = (gx - N / 2) * RES, y = (gy - N / 2) * RES, r = rnd(0, 999), k = 1;
+            if (x * x + y * y > 2600 * 2600) k = 0;
+            else if (r < 3) k = 3;
+            else if (r < 4) k = 2;
+            else if (r < 6) k = 0;
+            grid[gy * N + gx] = logodds[k];
+            classes[(gy * N + gx) >> 2] |= (uint8_t)(k << (((gy * N + gx) & 3) * 2));
+        }
+    FILE *out = fopen(".pio/host-tests/route_corridor_fixture.json", "w");
+    assert(out);
+    fprintf(out, "{\"n\":%d,\"res\":%d,\"radius\":%d,\"cells\":[", N, RES, RADIUS);
+    for (unsigned i = 0; i < sizeof(classes); i++) fprintf(out, i ? ",%u" : "%u", classes[i]);
+    fprintf(out, "],\"routes\":[");
+    unsigned written = 0, verdicts[3] = {0};
+    while (written < 300) {
+        route_definition_t r = {.generation = 1, .count = (uint16_t)rnd(3, 6)};
+        int cx = rnd(-1500, 1500), cy = rnd(-1500, 1500), span = rnd(300, 900);
+        for (unsigned i = 0; i < r.count; i++)
+            r.points[i] = (route_point_t){(int16_t)(cx + rnd(-span, span)), (int16_t)(cy + rnd(-span, span))};
+        if (route_definition_error(&r)) continue;
+        const char *code = route_grid_error(&r, grid, N, RES, RADIUS);
+        verdicts[!code ? 0 : !strcmp(code, "route_obstacle") ? 1 : 2]++;
+        fprintf(out, "%s{\"code\":\"%s\",\"points\":[", written++ ? "," : "", code ? code : "ok");
+        for (unsigned i = 0; i < r.count; i++) fprintf(out, i ? ",[%d,%d]" : "[%d,%d]", r.points[i].x, r.points[i].y);
+        fprintf(out, "]}");
+    }
+    fprintf(out, "]}\n");
+    fclose(out);
+    assert(verdicts[0] && verdicts[1] && verdicts[2]);   /* every verdict is exercised */
+}
+
 static void write16(uint8_t *p, uint16_t x) { p[0] = x; p[1] = x >> 8; }
 static void write32(uint8_t *p, uint32_t x) { write16(p, x); write16(p + 2, x >> 16); }
 
@@ -129,17 +173,21 @@ int main(void)
     s.definition.adaptive=true; assert(route_runner_power(&s,low,1,2000,false)==85);
 
     static int8_t grid[256*256]; memset(grid,-20,sizeof(grid));
-    assert(!route_grid_error(&d,grid,256,50,120));
+    assert(!route_grid_error(&d,grid,256,50,100));
     /* (148,128) lies on the centre line at the route point (1000,0). */
-    grid[128*256+148]=30; assert(!strcmp(route_grid_error(&d,grid,256,50,120),"route_obstacle"));
-    grid[128*256+148]=12; assert(!strcmp(route_grid_error(&d,grid,256,50,120),"route_obstacle"));
-    grid[128*256+148]=0; assert(!strcmp(route_grid_error(&d,grid,256,50,120),"route_unexplored"));
+    grid[128*256+148]=30; assert(!strcmp(route_grid_error(&d,grid,256,50,100),"route_obstacle"));
+    grid[128*256+148]=12; assert(!strcmp(route_grid_error(&d,grid,256,50,100),"route_obstacle"));
+    grid[128*256+148]=0; assert(!strcmp(route_grid_error(&d,grid,256,50,100),"route_unexplored"));
     grid[128*256+148]=-20;
-    /* Beside the centre line: unknown space is acceptable, a mapped obstacle is not. */
-    grid[128*256+151]=0; assert(!route_grid_error(&d,grid,256,50,120));
-    grid[128*256+151]=30; assert(!strcmp(route_grid_error(&d,grid,256,50,120),"route_obstacle"));
-    grid[128*256+151]=-20; grid[128*256+152]=30; assert(!route_grid_error(&d,grid,256,50,120));
-    grid[128*256+152]=-20;
+    /* Beside the line the exact gap to the cell square counts: cell (149,128)
+       spans x 1050..1100 mm, 50 mm from the corner (1000,0); (151,128) is 150 mm away.
+       Unknown space beside the line is acceptable, a mapped obstacle is not. */
+    grid[128*256+149]=0; assert(!route_grid_error(&d,grid,256,50,100));
+    grid[128*256+149]=30; assert(!strcmp(route_grid_error(&d,grid,256,50,100),"route_obstacle"));
+    assert(!route_grid_error(&d,grid,256,50,40));
+    grid[128*256+149]=-20; grid[128*256+151]=30; assert(!route_grid_error(&d,grid,256,50,100));
+    assert(!strcmp(route_grid_error(&d,grid,256,50,160),"route_obstacle"));
+    grid[128*256+151]=-20;
     d.points[1]=d.points[0]; assert(route_definition_error(&d));
     d=circle(1); d.points[0].x=6300; assert(route_definition_error(&d));
 
@@ -154,6 +202,7 @@ int main(void)
     packet[24]=1;assert(!route_packet_decode(packet,sizeof(packet),&d,&token,&serial));packet[24]=0;
     packet[5]=2;assert(!route_packet_decode(packet,sizeof(packet),&d,&token,&serial));packet[5]=1;
     assert(!route_packet_decode(packet,sizeof(packet)-1,&d,&token,&serial));
+    corridor_fixture();
     puts("Route runner: ordered closure, pass-through waypoints, approach hand-off, finite/infinite laps, fresh poses, map binding, confidence, power, corridor and packet checks passed.");
     return 0;
 }

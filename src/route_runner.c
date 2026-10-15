@@ -54,33 +54,76 @@ bool route_packet_decode(const uint8_t *data, unsigned size, route_definition_t 
     return route_definition_error(d) == NULL;
 }
 
+static float segment_distance(float ax, float ay, float bx, float by, float px, float py)
+{
+    float dx = bx - ax, dy = by - ay, n = dx * dx + dy * dy;
+    float t = n > 0 ? ((px - ax) * dx + (py - ay) * dy) / n : 0;
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    return hypotf(px - ax - t * dx, py - ay - t * dy);
+}
+
+static float box_distance(float px, float py, float x0, float y0, float x1, float y1)
+{
+    float dx = px < x0 ? x0 - px : px > x1 ? px - x1 : 0;
+    float dy = py < y0 ? y0 - py : py > y1 ? py - y1 : 0;
+    return hypotf(dx, dy);
+}
+
+/* Exact distance between edge a-b and an axis-aligned cell square. */
+static float edge_cell_distance(route_point_t a, route_point_t b, float x0, float y0, float x1, float y1)
+{
+    float t0 = 0, t1 = 1, dx = (float)b.x - a.x, dy = (float)b.y - a.y;
+    float p[4] = {-dx, dx, -dy, dy}, q[4] = {a.x - x0, x1 - a.x, a.y - y0, y1 - a.y};
+    bool crosses = true;
+    for (int i = 0; i < 4 && crosses; i++) {
+        if (p[i] == 0) { crosses = q[i] >= 0; continue; }
+        float r = q[i] / p[i];
+        if (p[i] < 0) { if (r > t0) t0 = r; } else if (r < t1) t1 = r;
+        crosses = t0 <= t1;
+    }
+    if (crosses) return 0;
+    float best = fminf(box_distance(a.x, a.y, x0, y0, x1, y1), box_distance(b.x, b.y, x0, y0, x1, y1));
+    float cx[4] = {x0, x1, x0, x1}, cy[4] = {y0, y0, y1, y1};
+    for (int i = 0; i < 4; i++) best = fminf(best, segment_distance(a.x, a.y, b.x, b.y, cx[i], cy[i]));
+    return best;
+}
+
 const char *route_grid_error(const route_definition_t *d, const int8_t *grid,
                              unsigned size, unsigned res, unsigned radius)
 {
     if (route_definition_error(d) || !grid || !res || size < 2 || size > 512 || radius > 1000)
         return "route_invalid_points";
-    int cells = (int)((radius + res - 1) / res);
+    int half = (int)size / 2;
     for (unsigned i = 0; i < d->count; i++) {
         route_point_t a = d->points[i], b = d->points[(i + 1) % d->count];
         unsigned steps = (unsigned)ceilf(distance(a, b) / (res * 0.5f));
         for (unsigned step = 0; step <= steps; step++) {
             float t = (float)step / steps;
-            int gx = (int)floorf((a.x + (b.x - a.x) * t) / res) + (int)size / 2;
-            int gy = (int)floorf((a.y + (b.y - a.y) * t) / res) + (int)size / 2;
+            int gx = (int)floorf((a.x + (b.x - a.x) * t) / res) + half;
+            int gy = (int)floorf((a.y + (b.y - a.y) * t) / res) + half;
             if (gx < 0 || gy < 0 || gx >= (int)size || gy >= (int)size) return "route_unexplored";
             /* The centre line runs through space the robot has seen free. */
             uint8_t centre = slam_cell_class(grid[gy * size + gx]);
             if (centre >= 2) return "route_obstacle";
             if (centre == 0) return "route_unexplored";
-            /* Beside it only mapped obstacles count; the reactive layer handles the rest. */
-            for (int dy = -cells; dy <= cells; dy++)
-                for (int dx = -cells; dx <= cells; dx++) {
-                    if (dx * dx + dy * dy > cells * cells) continue;
-                    int x = gx + dx, y = gy + dy;
-                    if (x >= 0 && y >= 0 && x < (int)size && y < (int)size &&
-                        slam_cell_class(grid[y * size + x]) >= 2) return "route_obstacle";
-                }
         }
+        /* Beside it only mapped obstacles count, measured exactly against the
+           corridor the live navigation drives with; the reactive layer handles the rest. */
+        int x_lo = (int)floorf(((a.x < b.x ? a.x : b.x) - (float)radius) / res) + half;
+        int x_hi = (int)floorf(((a.x > b.x ? a.x : b.x) + (float)radius) / res) + half;
+        int y_lo = (int)floorf(((a.y < b.y ? a.y : b.y) - (float)radius) / res) + half;
+        int y_hi = (int)floorf(((a.y > b.y ? a.y : b.y) + (float)radius) / res) + half;
+        if (x_lo < 0) x_lo = 0;
+        if (y_lo < 0) y_lo = 0;
+        if (x_hi >= (int)size) x_hi = (int)size - 1;
+        if (y_hi >= (int)size) y_hi = (int)size - 1;
+        for (int y = y_lo; y <= y_hi; y++)
+            for (int x = x_lo; x <= x_hi; x++) {
+                if (slam_cell_class(grid[y * size + x]) < 2) continue;
+                float x0 = (float)(x - half) * res, y0 = (float)(y - half) * res;
+                if (edge_cell_distance(a, b, x0, y0, x0 + res, y0 + res) < radius) return "route_obstacle";
+            }
     }
     return NULL;
 }
@@ -123,11 +166,7 @@ void route_runner_stop(route_runner_t *s, bool penalize)
 
 static float deviation(route_point_t a, route_point_t b, float x, float y)
 {
-    float dx = b.x - a.x, dy = b.y - a.y;
-    float t = ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy);
-    if (t < 0) t = 0;
-    if (t > 1) t = 1;
-    return hypotf(x - a.x - t * dx, y - a.y - t * dy);
+    return segment_distance(a.x, a.y, b.x, b.y, x, y);
 }
 
 /* Beyond the line through b perpendicular to a->b: the waypoint was passed. */

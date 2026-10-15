@@ -74,11 +74,12 @@ const char *robot_mode_name(robot_mode_t mode)
     return mode <= ROBOT_FAULT ? names[mode] : "fault";
 }
 
-/* Map pre-check corridor around a route edge. The swept turning circle is not
-   required along the whole edge: rotations are guarded live by the swing check. */
+/* Map pre-check corridor around a route edge: the same half width the live
+   navigation drives with (robot_width_mm), never less than the body. Stop
+   distances and the swing check still guard every move. */
 static unsigned route_corridor_mm(motion_settings_t settings)
 {
-    unsigned radius = SEEKER_BODY_HALF_WIDTH_MM + ROUTE_CORRIDOR_MARGIN_MM;
+    unsigned radius = SEEKER_BODY_HALF_WIDTH_MM;
     if ((unsigned)settings.robot_width_mm / 2 > radius) radius = settings.robot_width_mm / 2;
     return radius;
 }
