@@ -2,7 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Scan-matching SLAM without wheel odometry (Hector-style).
+/* Scan-matching SLAM without wheel odometry (Hector-SLAM).
  * World frame: x = initial forward, y = left, theta CCW (rad), units mm.
  * Occupancy grid in int8 log-odds, cell (gx, gy) at index gy * SIZE + gx,
  * world (0, 0) = cell (ORIGIN, ORIGIN). Pure C: host-testable. */
