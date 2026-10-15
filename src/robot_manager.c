@@ -5,6 +5,7 @@
 #include "track_drive.h"
 #include "seeker_pins.h"
 #include <string.h>
+#include <math.h>
 #include "esp_timer.h"
 #include "esp_random.h"
 #include "esp_task_wdt.h"
@@ -59,6 +60,13 @@ static int64_t s_heartbeat, s_manual_time, s_auto_started, s_lidar_bad_since;
 static int s_requested_drive, s_requested_turn;
 static navigation_auto_t s_navigation;
 static motion_axis_t s_drive_axis, s_turn_axis;
+static route_runner_t s_route;
+static bool s_map_reset_wait;
+static uint32_t s_reset_generation;
+static int s_route_power;
+static uint32_t s_route_revision;
+static void stop_locked(robot_mode_t mode, const char *reason);
+static bool lease_valid(int64_t now);
 
 const char *robot_mode_name(robot_mode_t mode)
 {
@@ -66,8 +74,66 @@ const char *robot_mode_name(robot_mode_t mode)
     return mode <= ROBOT_FAULT ? names[mode] : "fault";
 }
 
+void robot_manager_route_snapshot(route_runner_t *out)
+{
+    if (!out) return;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    *out = s_route;
+    xSemaphoreGive(s_lock);
+}
+
+esp_err_t robot_manager_start_route(uint32_t token, uint32_t sequence,
+                                    const route_definition_t *definition, const char **reason)
+{
+    *reason = route_definition_error(definition);
+    if (*reason) return ESP_ERR_INVALID_ARG;
+    robot_status_t before = robot_manager_status();
+    *reason = "route_busy";
+    if (before.mode != ROBOT_IDLE || before.drive || before.turn) return ESP_ERR_INVALID_STATE;
+    *reason = "route_wrong_map";
+    if (definition->generation != before.map.generation) return ESP_ERR_INVALID_STATE;
+    *reason = "route_not_ready";
+    if (!before.commissioned || !before.lidar_healthy || !before.map.valid || before.map.weak ||
+        !pose_feedback_fresh(before.map.feedback, esp_timer_get_time())) return ESP_ERR_INVALID_STATE;
+    *reason = "route_power_range";
+    if (before.settings.auto_drive_percent < before.settings.drive_min_percent) return ESP_ERR_INVALID_STATE;
+    unsigned extent = SEEKER_BODY_FRONT_MM > SEEKER_BODY_REAR_MM ? SEEKER_BODY_FRONT_MM : SEEKER_BODY_REAR_MM;
+    unsigned radius = (unsigned)ceilf(hypotf((float)extent, SEEKER_BODY_HALF_WIDTH_MM)) + 50;
+    if ((unsigned)before.settings.robot_width_mm / 2 > radius) radius = before.settings.robot_width_mm / 2;
+    *reason = "route_unknown_or_blocked";
+    if (!route_grid_clear(definition, mapper_grid(), SLAM_SIZE, SLAM_RES_MM, radius))
+        return ESP_ERR_INVALID_STATE;
+    /* Geometry is checked without the manager lock, while explicitly idle.
+       Re-check authorization and pose afterwards; all buffers are fixed-size. */
+    mapper_info_t map = mapper_info();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    int64_t now = esp_timer_get_time();
+    esp_err_t error = ESP_ERR_INVALID_STATE;
+    *reason = "route_controller_or_state";
+    if (token && token == s_token && lease_valid(now) && s_status.network && sequence > s_sequence &&
+        s_status.mode == ROBOT_IDLE && s_status.commissioned && s_status.lidar_healthy && !s_map_reset_wait &&
+        map.generation == definition->generation && map.valid && !map.weak && pose_feedback_fresh(map.feedback, now)) {
+        s_sequence = sequence;
+        s_heartbeat = now;
+        stop_locked(ROBOT_AUTO, "route_ready");
+        if (s_status.mode == ROBOT_AUTO) {
+            route_runner_start(&s_route, definition, (uint64_t)(now / 1000));
+            s_route_revision++;
+            navigation_auto_configure(&s_navigation, NAV_STRATEGY_PATH,
+                definition->points[0].x, definition->points[0].y);
+            s_route_power = route_runner_power(&s_route, s_status.settings, map.quality, 0, true);
+            s_auto_started = now;
+            *reason = NULL;
+            error = ESP_OK;
+        }
+    }
+    xSemaphoreGive(s_lock);
+    return error;
+}
+
 static void stop_locked(robot_mode_t mode, const char *reason)
 {
+    route_runner_stop(&s_route, strcmp(reason, "route_complete") != 0);
     if (s_status.mode == ROBOT_AUTO || mode == ROBOT_FAULT)
         ESP_LOGW(TAG, "Stop mode=%s reason=%s", robot_mode_name(mode), reason);
     s_requested_drive = s_requested_turn = 0;
@@ -183,6 +249,7 @@ static void manager_task(void *arg)
         view.map_lost = map.lost;
         view.map_weak = map.weak || !pose_fresh;
         xSemaphoreTake(s_lock, portMAX_DELAY);
+        if (s_map_reset_wait && map.generation != s_reset_generation) s_map_reset_wait = false;
         s_status.view = view;
         s_status.coverage = scan.valid_sectors;
         s_status.scan_sequence = scan.sequence;
@@ -226,19 +293,71 @@ static void manager_task(void *arg)
         } else if (s_status.mode == ROBOT_AUTO) {
             if (!s_status.lidar_healthy && now - s_lidar_bad_since >= LIDAR_FAULT_MS * 1000LL)
                 stop_locked(ROBOT_FAULT, "lidar_stale_or_incomplete");
-            else if (now - s_auto_started >= s_status.settings.auto_limit_s * 1000000LL)
+            else if (!s_route.active && now - s_auto_started >= s_status.settings.auto_limit_s * 1000000LL)
                 stop_locked(ROBOT_IDLE, "auto_time_limit");
+            else if (s_route.active && map.generation != s_route.definition.generation) {
+                stop_locked(ROBOT_IDLE, "route_map_changed");
+                route_runner_clear(&s_route);
+            }
             else if (!s_status.lidar_healthy || !link_ok) {
                 /* Hold still and re-plan from scratch when data returns. */
                 navigation_auto_reset(&s_navigation);
+                if (s_route.active) {
+                    const char *unused;
+                    route_runner_step(&s_route, (route_sample_t){.generation = map.generation,
+                        .now_ms = (uint64_t)(now / 1000), .healthy = false}, &unused);
+                }
                 s_status.reason = !link_ok ? "link_wait" : "lidar_wait";
             } else {
-                navigation_plan_t p = navigation_auto_step(&s_navigation, &view,
-                    s_status.settings, now / 1000, scan.sequence);
-                if (p.done) stop_locked(ROBOT_IDLE, p.reason);
-                else {
-                    drive = p.drive; turn = p.turn; tight = p.tight; precision = p.precision;
-                    s_status.reason = p.reason;
+                motion_settings_t settings = s_status.settings;
+                navigation_view_t auto_view = view;
+                bool ready = true;
+                if (s_route.active) {
+                    const char *reason;
+                    route_result_t result = route_runner_step(&s_route, (route_sample_t){
+                        .x = view.pose_x, .y = view.pose_y, .quality = map.quality,
+                        .sequence = view.pose_sequence, .generation = map.generation,
+                        .now_ms = (uint64_t)(now / 1000),
+                        .healthy = view.pose_valid && !view.map_weak && !view.map_lost && !map.degenerate
+                    }, &reason);
+                    if (result == ROUTE_DONE || result == ROUTE_FAILED) {
+                        stop_locked(ROBOT_IDLE, reason);
+                        ready = false;
+                    } else if (result == ROUTE_WAIT) {
+                        navigation_auto_reset(&s_navigation);
+                        s_status.reason = "route_localization_wait";
+                        ready = false;
+                    } else {
+                        route_point_t point = s_route.definition.points[s_route.target];
+                        if (result == ROUTE_NEXT)
+                            navigation_auto_configure(&s_navigation, NAV_STRATEGY_ROUTE, point.x, point.y);
+                        if (!s_route.approaching) {
+                            auto_view.route_valid = view.pose_valid;
+                            auto_view.route_goal_x = auto_view.route_way_x = point.x;
+                            auto_view.route_goal_y = auto_view.route_way_y = point.y;
+                            memset(auto_view.explore_bonus, 0, sizeof(auto_view.explore_bonus));
+                        }
+                        s_route_power = route_runner_power(&s_route, settings, map.quality,
+                            view.free_mm[NAV_CENTER], view.uncertain_mask & (1u << NAV_CENTER));
+                        settings.auto_drive_percent = s_route_power;
+                        if (settings.auto_slow_percent > s_route_power) settings.auto_slow_percent = s_route_power;
+                    }
+                }
+                if (ready) {
+                    navigation_plan_t p = navigation_auto_step(&s_navigation, &auto_view,
+                        settings, now / 1000, scan.sequence);
+                    if (p.done) stop_locked(ROBOT_IDLE, s_route.active ? "route_unreachable" : p.reason);
+                    else {
+                        drive = p.drive; turn = p.turn; tight = p.tight; precision = p.precision;
+                        s_status.reason = p.reason;
+                        if (s_route.active && (!strncmp(p.reason, "escape", 6) ||
+                            !strncmp(p.reason, "wiggle", 6) || !strcmp(p.reason, "path_avoid"))) {
+                            route_runner_trouble(&s_route);
+                            int base = settings.auto_slow_percent > settings.drive_min_percent ?
+                                settings.auto_slow_percent : settings.drive_min_percent;
+                            if (drive > base) drive = base;
+                        }
+                    }
                 }
             }
         }
@@ -376,7 +495,13 @@ esp_err_t robot_manager_command(uint32_t token, uint32_t sequence, const char *c
             else err = ESP_ERR_INVALID_ARG;
         } else if (!strcmp(cmd, "map_reset")) {
             if (s_status.mode == ROBOT_AUTO) err = ESP_ERR_INVALID_STATE;
-            else { mapper_request_reset(); s_status.reason = "map_reset"; }
+            else {
+                route_runner_clear(&s_route);
+                s_map_reset_wait = true;
+                s_route_revision++;
+                s_reset_generation = map.generation;
+                mapper_request_reset(); s_status.reason = "map_reset";
+            }
         } else if (!strcmp(cmd, "move")) {
             if (s_status.mode != ROBOT_MANUAL) err = ESP_ERR_INVALID_STATE;
             else if (drive < -SEEKER_MANUAL_MAX_PERCENT || drive > SEEKER_MANUAL_MAX_PERCENT ||
@@ -404,10 +529,10 @@ robot_status_t robot_manager_status(void)
         status.map.valid = false;
         status.map.weak = true;
     }
-    status.strategy = navigation_strategy_name(s_navigation.strategy);
+    status.strategy = s_route.active ? "route" : navigation_strategy_name(s_navigation.strategy);
     status.nav_detail = s_navigation.detail ? s_navigation.detail : "idle";
     status.goal_set = s_navigation.strategy == NAV_STRATEGY_GOAL ||
-                      s_navigation.strategy == NAV_STRATEGY_PATH;
+                      s_navigation.strategy == NAV_STRATEGY_PATH || s_navigation.strategy == NAV_STRATEGY_ROUTE;
     status.goal_x = s_navigation.goal_x;
     status.goal_y = s_navigation.goal_y;
     status.auto_phase = navigation_phase_name(s_navigation.phase);
@@ -417,6 +542,22 @@ robot_status_t robot_manager_status(void)
     status.heartbeat_age_ms = s_token ? (uint32_t)((now - s_heartbeat) / 1000) : UINT32_MAX;
     int64_t remaining = s_status.settings.auto_limit_s - (now - s_auto_started) / 1000000;
     status.auto_remaining_s = s_status.mode == ROBOT_AUTO && remaining > 0 ? (uint32_t)remaining : 0;
+    if (s_route.active) {
+        status.auto_remaining_s = 0; /* the explicit lap budget replaces the test time limit */
+        if (!s_route.approaching) status.map.target.valid = false;
+    }
+    status.route_active = s_route.active;
+    status.route_configured = s_route.configured;
+    status.route_approaching = s_route.approaching;
+    status.route_adaptive = s_route.definition.adaptive;
+    status.route_laps = s_route.definition.laps;
+    status.route_completed = s_route.completed;
+    status.route_learned_laps = s_route.learned_laps;
+    status.route_points = s_route.definition.count;
+    status.route_target = s_route.target;
+    status.route_confidence = route_runner_confidence(&s_route);
+    status.route_power = s_route_power;
+    status.route_revision = s_route_revision;
     xSemaphoreGive(s_lock);
     return status;
 }

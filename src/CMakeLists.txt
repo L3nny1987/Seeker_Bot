@@ -21,6 +21,7 @@ idf_component_register(
         "main.c"
         "diag.c"
         "navigation.c"
+        "route_runner.c"
         "slam.c"
         "imu.c"
         "mapper.c"

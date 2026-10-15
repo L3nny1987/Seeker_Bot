@@ -74,7 +74,8 @@ navigation_view_t navigation_analyze(const uint16_t distance[360], int front_deg
 
 typedef enum {
     NAV_STRATEGY_EXPLORE, NAV_STRATEGY_WALL_LEFT, NAV_STRATEGY_WALL_RIGHT, NAV_STRATEGY_GOAL,
-    NAV_STRATEGY_PATH                   /* goal via the SLAM map path */
+    NAV_STRATEGY_PATH,                  /* goal via the SLAM map path */
+    NAV_STRATEGY_ROUTE                  /* ordered closed route; runner owns arrival */
 } navigation_strategy_t;
 
 typedef enum {

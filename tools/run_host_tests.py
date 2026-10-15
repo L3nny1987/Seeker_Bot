@@ -16,6 +16,8 @@ CASES = {
     "map_transport_test": None,
     "ld20_scan_test": "components/ld20_lidar/ld20_scan_builder.c",
     "slam_test": "src/slam.c",
+    "route_runner_test": "src/route_runner.c",
+    "route_navigation_test": ["src/route_runner.c", "src/navigation.c"],
 }
 
 
@@ -44,7 +46,7 @@ def main():
         command = [compiler, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
                    "-I", "src", "-I", "components/ld20_lidar/include", f"test/{name}.c"]
         if source:
-            command.append(source)
+            command.extend(source if isinstance(source, list) else [source])
         run(command + ["-lm", "-o", exe])
         run([exe])
     tests = sorted((ROOT / "test").glob("*_test.js"))

@@ -6,6 +6,7 @@
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_timer.h"
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -27,6 +28,7 @@ static SemaphoreHandle_t s_lock;
 static mapper_info_t s_info;
 static pose_feedback_t s_feedback;
 static uint32_t s_pose_sequence;
+static uint32_t s_generation;
 static unsigned s_good_matches;
 static volatile bool s_moving, s_reset;
 static uint8_t s_avoid[SLAM_PLAN_SIZE * SLAM_PLAN_SIZE];
@@ -61,6 +63,7 @@ static void publish(uint32_t update_ms)
     s_info.update_ms = update_ms;
     s_info.feedback = s_feedback;
     s_info.scan_sequence = s_pose_sequence;
+    s_info.generation = s_generation;
     s_info.imu = s_slam.imu_used;
     s_info.heading_sigma = slam_heading_sigma(&s_slam);
     s_info.gyro_bias = s_slam.gyro_bias;
@@ -252,6 +255,7 @@ static void mapper_task(void *arg)
         if (s_reset) {
             /* Readers only see a cleared map; no allocation, no lock needed. */
             slam_reset(&s_slam);
+            do { s_generation = esp_random(); } while (!s_generation);
             memset(s_avoid, 0, sizeof(s_avoid));
             s_avoided = 0;
             s_target.valid = false;
@@ -290,6 +294,8 @@ esp_err_t mapper_init(void)
     s_lock = xSemaphoreCreateMutex();
     if (!s_lock) return ESP_ERR_NO_MEM;
     slam_reset(&s_slam);
+    do { s_generation = esp_random(); } while (!s_generation);
+    publish(0);
     /* Core 1, below the manager (8) so motor control always wins. */
     return xTaskCreatePinnedToCore(mapper_task, "mapper", 4096, NULL, 4, NULL, 1) == pdPASS
            ? ESP_OK : ESP_ERR_NO_MEM;

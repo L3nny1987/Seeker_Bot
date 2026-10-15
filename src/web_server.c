@@ -233,6 +233,13 @@ static esp_err_t status_handler(httpd_req_t *req)
         s.strategy, s.nav_detail, json_bool(s.goal_set), s.goal_x, s.goal_y,
         s.view.wall_left.valid ? (unsigned)s.view.wall_left.distance_mm : 0u, s.view.wall_left.angle_deg,
         s.view.wall_right.valid ? (unsigned)s.view.wall_right.distance_mm : 0u, s.view.wall_right.angle_deg);
+    put(&w, "\"mapGeneration\":%lu,\"routeRevision\":%lu,\"routeActive\":%s,\"routeConfigured\":%s,"
+        "\"routeApproaching\":%s,\"routeAdaptive\":%s,\"routeLaps\":%lu,\"routeCompleted\":%lu,"
+        "\"routeLearnedLaps\":%lu,\"routePoints\":%u,\"routeTarget\":%u,\"routeConfidence\":%u,\"routePower\":%d,",
+        (unsigned long)s.map.generation, (unsigned long)s.route_revision, json_bool(s.route_active),
+        json_bool(s.route_configured), json_bool(s.route_approaching), json_bool(s.route_adaptive),
+        (unsigned long)s.route_laps, (unsigned long)s.route_completed, (unsigned long)s.route_learned_laps,
+        s.route_points, s.route_target, s.route_confidence, s.route_power);
     put(&w, "\"poseValid\":%s,\"slamLost\":%s,\"poseX\":%.0f,\"poseY\":%.0f,\"poseDeg\":%.1f,"
         "\"slamQuality\":%.2f,\"slamScans\":%lu,\"slamIntegrated\":%lu,\"slamRejected\":%lu,"
         "\"slamUpdateMs\":%lu,\"mapAreaM2\":%.1f,\"pathPoints\":%u,",
@@ -507,6 +514,56 @@ static esp_err_t control_handler(httpd_req_t *req)
     return text_reply(req, NULL, "{\"ok\":true}");
 }
 
+static esp_err_t route_get_handler(httpd_req_t *req)
+{
+    route_runner_t route;
+    robot_manager_route_snapshot(&route);
+    writer_t w = {0};
+    put(&w, "{\"configured\":%s,\"active\":%s,\"generation\":%lu,\"laps\":%lu,"
+        "\"completed\":%lu,\"learnedLaps\":%lu,\"adaptive\":%s,\"target\":%u,\"approaching\":%s,\"points\":[",
+        json_bool(route.configured), json_bool(route.active), (unsigned long)route.definition.generation,
+        (unsigned long)route.definition.laps, (unsigned long)route.completed, (unsigned long)route.learned_laps,
+        json_bool(route.definition.adaptive), route.target, json_bool(route.approaching));
+    for (unsigned i = 0; i < route.definition.count; i++)
+        put(&w, i ? ",[%d,%d]" : "[%d,%d]", route.definition.points[i].x, route.definition.points[i].y);
+    put(&w, "],\"scores\":[");
+    for (unsigned i = 0; i < route.definition.count; i++) put(&w, i ? ",%u" : "%u", route.score[i]);
+    put(&w, "]}");
+    return json_reply(req, &w);
+}
+
+static esp_err_t route_post_handler(httpd_req_t *req)
+{
+    const char *foreign = foreign_request(req);
+    if (foreign) return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, foreign);
+    char type[48];
+    if (httpd_req_get_hdr_value_str(req, "Content-Type", type, sizeof(type)) != ESP_OK ||
+        strcmp(type, "application/octet-stream") || req->content_len < ROUTE_PACKET_HEADER ||
+        req->content_len > ROUTE_PACKET_MAX)
+        return text_reply(req, "400 Bad Request", "{\"ok\":false,\"error\":\"route_invalid_packet\"}");
+    if (ota_running()) return text_reply(req, "409 Conflict", "{\"ok\":false,\"error\":\"ota_busy\"}");
+    if (!bulk_allowed()) return bulk_unavailable(req);
+    uint8_t body[ROUTE_PACKET_MAX];
+    unsigned used = 0;
+    while (used < req->content_len) {
+        int n = httpd_req_recv(req, (char *)body + used, req->content_len - used);
+        if (n <= 0) return text_reply(req, "400 Bad Request", "{\"ok\":false,\"error\":\"route_incomplete\"}");
+        used += n;
+    }
+    route_definition_t definition;
+    uint32_t token, sequence;
+    if (!route_packet_decode(body, used, &definition, &token, &sequence))
+        return text_reply(req, "400 Bad Request", "{\"ok\":false,\"error\":\"route_invalid_packet\"}");
+    const char *reason = NULL;
+    esp_err_t error = robot_manager_start_route(token, sequence, &definition, &reason);
+    if (error != ESP_OK) {
+        char reply[128];
+        snprintf(reply, sizeof(reply), "{\"ok\":false,\"error\":\"%s\"}", reason ? reason : "route_rejected");
+        return text_reply(req, error == ESP_ERR_INVALID_ARG ? "400 Bad Request" : "409 Conflict", reply);
+    }
+    return text_reply(req, NULL, "{\"ok\":true}");
+}
+
 /* Only images of this project (app descriptor) are accepted. */
 static bool own_image(const uint8_t *data, size_t size)
 {
@@ -721,7 +778,7 @@ esp_err_t seeker_web_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
     config.max_open_sockets = SEEKER_HTTP_CLIENTS;
-    config.max_uri_handlers = 12;
+    config.max_uri_handlers = 14;
     config.lru_purge_enable = true;
     config.open_fn = socket_open;
     config.recv_wait_timeout = 1;
@@ -741,6 +798,8 @@ esp_err_t seeker_web_start(void)
         { .uri = "/api/scan", .method = HTTP_GET, .handler = scan_handler },
         { .uri = "/api/map", .method = HTTP_GET, .handler = map_handler },
         { .uri = "/api/control", .method = HTTP_POST, .handler = control_handler },
+        { .uri = "/api/route", .method = HTTP_GET, .handler = route_get_handler },
+        { .uri = "/api/route", .method = HTTP_POST, .handler = route_post_handler },
         { .uri = "/api/ota", .method = HTTP_POST, .handler = ota_handler },
         { .uri = "/api/record", .method = HTTP_GET, .handler = record_get_handler },
         { .uri = "/api/record", .method = HTTP_POST, .handler = record_post_handler },

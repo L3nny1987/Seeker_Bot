@@ -12,6 +12,7 @@ typedef struct {
     float x, y, theta, quality;
     uint32_t scans, integrated, rejected, update_ms;
     uint32_t scan_sequence;
+    uint32_t generation;         /* changes on boot and every completed map reset */
     pose_feedback_t feedback;     /* gyro reference at the published scan pose */
     unsigned known_cells;
     uint16_t path_count;

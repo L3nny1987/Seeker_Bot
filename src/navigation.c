@@ -207,7 +207,7 @@ const char *navigation_phase_name(navigation_phase_t phase)
 
 const char *navigation_strategy_name(navigation_strategy_t strategy)
 {
-    static const char *names[] = {"explore", "wall_left", "wall_right", "goal", "path"};
+    static const char *names[] = {"explore", "wall_left", "wall_right", "goal", "path", "route"};
     return (unsigned)strategy < sizeof(names)/sizeof(names[0]) ? names[strategy] : "explore";
 }
 
@@ -580,7 +580,7 @@ static navigation_plan_t follow_route(navigation_auto_t *s, const navigation_vie
 static bool slam_pause(navigation_auto_t *s, const navigation_view_t *v, uint64_t now)
 {
     bool map_mode = s->strategy == NAV_STRATEGY_EXPLORE || s->strategy == NAV_STRATEGY_PATH ||
-                    s->strategy == NAV_STRATEGY_GOAL;
+                    s->strategy == NAV_STRATEGY_GOAL || s->strategy == NAV_STRATEGY_ROUTE;
     if (!map_mode || !(v->map_lost || v->map_weak)) {
         s->slam_waiting = false;
         return false;
@@ -722,8 +722,9 @@ static navigation_plan_t path_step(navigation_auto_t *s, const navigation_view_t
     float x = v->pose_x, y = v->pose_y;
     bool route = v->route_valid &&
         hypotf(v->route_goal_x - s->goal_x, v->route_goal_y - s->goal_y) < NAV_ROUTE_MATCH_MM;
-    if (hypotf(s->goal_x - x, s->goal_y - y) <= NAV_GOAL_RADIUS_MM ||
-        (route && hypotf(v->route_goal_x - x, v->route_goal_y - y) <= NAV_GOAL_RADIUS_MM)) {
+    if (s->strategy != NAV_STRATEGY_ROUTE &&
+        (hypotf(s->goal_x - x, s->goal_y - y) <= NAV_GOAL_RADIUS_MM ||
+         (route && hypotf(v->route_goal_x - x, v->route_goal_y - y) <= NAV_GOAL_RADIUS_MM))) {
         s->detail = "goal_reached";
         p.reason = "goal_reached"; p.done = true;
         return p;
@@ -761,7 +762,8 @@ navigation_plan_t navigation_auto_step(navigation_auto_t *s, const navigation_vi
     c.rotate = v->rotation_known && v->swing_mm > cfg.auto_rotate_mm;
     c.uncertain = v->uncertain_mask & (1u << NAV_CENTER);
     bool explore = s->strategy == NAV_STRATEGY_EXPLORE || s->strategy == NAV_STRATEGY_WALL_LEFT ||
-                   s->strategy == NAV_STRATEGY_WALL_RIGHT || s->strategy == NAV_STRATEGY_PATH;
+                   s->strategy == NAV_STRATEGY_WALL_RIGHT || s->strategy == NAV_STRATEGY_PATH ||
+                   s->strategy == NAV_STRATEGY_ROUTE;
     c.best = best_heading(v, c.threshold, s->heading_deg, explore);
     if (c.best >= 0) s->heading_deg = navigation_heading_deg(c.best);
     if (new_scan || !s->cruising)
@@ -801,7 +803,8 @@ navigation_plan_t navigation_auto_step(navigation_auto_t *s, const navigation_vi
             return start_maneuver(s, v, &cfg, c.best, c.rotate, c.rear, true, now, "stuck_no_progress", 0);
         navigation_plan_t plan;
         if (s->strategy == NAV_STRATEGY_GOAL) plan = goal_step(s, v, &cfg, now, &c);
-        else if (s->strategy == NAV_STRATEGY_PATH) plan = path_step(s, v, &cfg, now, &c);
+        else if (s->strategy == NAV_STRATEGY_PATH || s->strategy == NAV_STRATEGY_ROUTE)
+            plan = path_step(s, v, &cfg, now, &c);
         else if (s->strategy == NAV_STRATEGY_WALL_LEFT) plan = wall_step(s, v, &cfg, now, &c, -1);
         else if (s->strategy == NAV_STRATEGY_WALL_RIGHT) plan = wall_step(s, v, &cfg, now, &c, 1);
         else plan = explore_step(s, v, &cfg, now, &c);
