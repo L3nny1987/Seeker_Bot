@@ -1,10 +1,10 @@
 # Seeker_Bot 0.3.3 – Verbindungsabbrüche und ESP32-Neustarts
 
-14.10.2026 · Projekt: C:\Users\Lenna\Documents\PlatformIO\Projects\Seeker_Bot
+14.10.2026 · Projekt: Repository-Wurzel
 
 ## Direkt am Roboter festgestellte Fakten
 
-Die Endpunkte `/api/status` und `/api/diag` waren zunächst unter http://192.168.178.91 erreichbar. Auf dem Gerät läuft Firmware 0.3.2. Es wurde keine Fahrt gestartet oder Steuerung übernommen.
+Die Endpunkte `/api/status` und `/api/diag` waren zunächst unter http://ROBOTER_IP erreichbar. Auf dem Gerät läuft Firmware 0.3.2. Es wurde keine Fahrt gestartet oder Steuerung übernommen.
 
 Die Reset-Historie meldet drei `interrupt_watchdog`-Neustarts im autonomen Betrieb:
 
@@ -47,7 +47,7 @@ Das OTA-Image ist eine Anwendungsfirmware für die vorhandene Partitionierung. E
 
 ```powershell
 # Im Projektordner, Roboter im Stillstand:
-.\tools\ota_upload.ps1 192.168.178.91 .\ota\seeker_bot_0.3.3.bin
+.\tools\ota_upload.ps1 ROBOTER_IP .\ota\seeker_bot_0.3.3.bin
 ```
 
 Vor einem Update vorhandene SLAM-Aufzeichnungen herunterladen, falls sie benötigt werden: Der Recorder verwendet den freien OTA-Slot, den das Update überschreibt.

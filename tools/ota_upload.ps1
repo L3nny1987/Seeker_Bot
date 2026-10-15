@@ -3,12 +3,12 @@
     Uploads Seeker_Bot firmware (incl. web interface) over Wi-Fi.
 
 .EXAMPLE
-    .\tools\ota_upload.ps1
-    .\tools\ota_upload.ps1 192.168.178.91 .\ota\seeker_bot_0.3.0.bin
+    .\tools\ota_upload.ps1 ROBOTER_IP
+    .\tools\ota_upload.ps1 ROBOTER_IP .\ota\seeker_bot_0.3.0.bin
 #>
 param(
-    [Parameter(Position = 0)]
-    [string]$Address = "192.168.178.91",
+    [Parameter(Position = 0, Mandatory = $true)]
+    [string]$Address,
     [Parameter(Position = 1)]
     [string]$Firmware = (Join-Path $PSScriptRoot "..\ota\seeker_bot_latest.bin")
 )

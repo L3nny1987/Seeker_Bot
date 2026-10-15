@@ -18,3 +18,16 @@ recordings/
 # Local Wi-Fi credentials (never commit).
 credentials.h
 managed_components/
+
+# Local tools, exports and editor state
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+exports/
+*.log

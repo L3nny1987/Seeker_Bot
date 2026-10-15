@@ -1,7 +1,7 @@
 # Seeker_Bot: Navigation und sporadische Karten-Drift
 
 Stand: 12.10.2026 · Firmware 0.3.2
-Projekt: C:\Users\Lenna\Documents\PlatformIO\Projects\Seeker_Bot
+Projekt: Repository-Wurzel
 
 Die vorhandenen, noch nicht committeten SLAM-, OTA-, Dashboard- und Diagnoseänderungen wurden als Ausgangspunkt erhalten. Es wurde keine Firmware auf den Roboter übertragen und keine Fahrt gestartet.
 
@@ -36,18 +36,18 @@ Die bestehende Simulation der großen Halle besteht weiterhin: 938 Scans, kein L
 
 Die vorhandene Aufzeichnung `slam_20261009_133654.bin` enthält 51 Scans ohne Fahr- oder Drehbefehl. Der Replay zeigt weder vorher noch nachher Positionssprünge. Damit lässt sich der sporadische Ausreißer während der Fahrt nicht nachweisen. Für die reale Ursache ist weiterhin eine Aufzeichnung einer betroffenen Fahrt nötig. Die Änderungen schließen nachgewiesene Software-Lücken, garantieren aber ohne Fahrtest noch keine zuverlässige Navigation auf der Hardware. In geometrisch uneindeutigen Bereichen kann der Roboter jetzt häufiger stehen bleiben; ohne zusätzliche Odometrie ist das die belastbare Reaktion.
 
-## Lokal prüfen
+## Historische Prüfung und erneuter Build
 
 Im Projektordner:
 
 ```powershell
 .\tools\run_host_tests.ps1
-& 'C:\Users\Lenna\.platformio\penv\Scripts\platformio.exe' run -e seeker_bot
+pio run -e seeker_bot
 ```
 
-Die Firmware wird zusätzlich nach `ota\seeker_bot_0.3.2.bin` und `ota\seeker_bot_latest.bin` exportiert. Die hier mitgelieferte BIN-Datei ist ein OTA-Anwendungsimage für die vorhandene Partitionierung, kein vollständiges Flash-Abbild einschließlich Bootloader.
+Die Firmware wird zusätzlich nach `ota\seeker_bot_0.3.2.bin` und `ota\seeker_bot_latest.bin` exportiert. Die damals gebaute BIN-Datei ist ein OTA-Anwendungsimage für die vorhandene Partitionierung, kein vollständiges Flash-Abbild einschließlich Bootloader.
 
-## Nächster Fahrtest
+## Vorgesehener Fahrtest dieses Entwicklungsstands
 
 1. Firmware 0.3.2 übertragen; nach dem Einschalten die Gyro-Kalibrierung im Stillstand abwarten. Eine neue Karte im Stillstand aufbauen lassen.
 2. Eine kurze gerade Zielanfahrt, eine 90°-Drehung und die Rückfahrt beobachten. Karte, tatsächliche Position und die neuen Diagnosefelder vergleichen.
@@ -69,4 +69,4 @@ Protokollreferenzen für Scanreihenfolge, Winkeleinheiten und Paketdaten: [LD20 
 
 Abschließender Build: ESP32 Release erfolgreich, keine Compiler-Warnungen im Build-Log. RAM 167104 / 327680 Bytes; Flash 987167 / 1966080 Bytes. OTA-Datei: 987600 Bytes. Alle 13 Testprogramme erfolgreich.
 
-SHA-256 des mitgelieferten OTA-Images: `C73F01AFD61E11674B0B2BFE92B910017BAF2A71EBEEF65DE6562ACED32B4DA9`.
+SHA-256 des damaligen lokalen OTA-Images: `C73F01AFD61E11674B0B2BFE92B910017BAF2A71EBEEF65DE6562ACED32B4DA9`.

@@ -1,5 +1,4 @@
 {
-	"platformio-ide.useBuiltinPIOCore": true,
-	"platformio-ide.useBuiltinPython": true,
-	"platformio-ide.customPATH": "C:\\Users\\Lenna\\.platformio\\penv\\Scripts"
+  "platformio-ide.useBuiltinPIOCore": true,
+  "platformio-ide.useBuiltinPython": true
 }

@@ -46,7 +46,7 @@ int main(void) {
 `;
 const exe = path.join(os.tmpdir(), `seeker-motor-test-${process.pid}.exe`);
 try {
-  const build = spawnSync('gcc', ['-x', 'c', '-std=c11', '-Wall', '-Wextra', '-Werror', '-', '-o', exe], {input: program, encoding: 'utf8'});
+  const build = spawnSync(process.env.CC || 'gcc', ['-x', 'c', '-std=c11', '-Wall', '-Wextra', '-Werror', '-', '-o', exe], {input: program, encoding: 'utf8'});
   assert.equal(build.status, 0, build.error?.message || build.stderr);
   const result = spawnSync(exe, [], {encoding: 'utf8'});
   assert.equal(result.status, 0, result.stderr);

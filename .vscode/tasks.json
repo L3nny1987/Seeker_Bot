@@ -1,27 +1,52 @@
 {
-	"version": "2.0.0",
-	"tasks": [
-		{
-			"label": "PlatformIO: Build Seeker Bot",
-			"type": "shell",
-			"command": "C:\\Users\\Lenna\\.platformio\\penv\\Scripts\\platformio.exe",
-			"args": [
-				"run",
-				"-e",
-				"seeker_bot"
-			],
-			"isBackground": false,
-			"problemMatcher": [
-				"$gcc"
-			],
-			"group": "build"
-		},
-		{
-			"label": "PlatformIO: Upload Seeker Bot COM4",
-			"type": "shell",
-			"command": "C:\\Users\\Lenna\\.platformio\\penv\\Scripts\\platformio.exe",
-			"args": ["run", "-e", "seeker_bot", "--target", "upload", "--upload-port", "COM4"],
-			"problemMatcher": ["$gcc"]
-		}
-	]
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Seeker Bot: Build",
+      "type": "shell",
+      "command": "pio",
+      "args": [
+        "run",
+        "-e",
+        "seeker_bot"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "group": "build"
+    },
+    {
+      "label": "Seeker Bot: USB upload (auto port)",
+      "type": "shell",
+      "command": "pio",
+      "args": [
+        "run",
+        "-e",
+        "seeker_bot",
+        "-t",
+        "upload"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "Seeker Bot: Host tests",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "tools/run_host_tests.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
 }

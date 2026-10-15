@@ -3,17 +3,17 @@
     Controls the SLAM input recorder and downloads recordings.
 
 .EXAMPLE
-    .\tools\slam_record.ps1 start      # robot IDLE; erases the free OTA slot
-    .\tools\slam_record.ps1 status
-    .\tools\slam_record.ps1 stop
-    .\tools\slam_record.ps1 download   # -> recordings\slam_<time>.bin
+    .\tools\slam_record.ps1 start ROBOTER_IP      # robot IDLE; erases the free OTA slot
+    .\tools\slam_record.ps1 status ROBOTER_IP
+    .\tools\slam_record.ps1 stop ROBOTER_IP
+    .\tools\slam_record.ps1 download ROBOTER_IP   # -> recordings\slam_<time>.bin
 #>
 param(
     [Parameter(Position = 0, Mandatory = $true)]
     [ValidateSet("start", "stop", "status", "download")]
     [string]$Command,
-    [Parameter(Position = 1)]
-    [string]$Address = "192.168.178.91"
+    [Parameter(Position = 1, Mandatory = $true)]
+    [string]$Address
 )
 
 $ErrorActionPreference = "Stop"

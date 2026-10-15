@@ -28,4 +28,4 @@ for(const [name,value] of Object.entries(expected)){
  assert.equal(dashboardDefaults[dashboardName[name]],value,name+' dashboard default');
 }
 assert.match(manager,/\.mode\s*=\s*ROBOT_IDLE/,'Boot must not start autonomous movement');
-console.log('Screenshot defaults verified; boot remains IDLE.');
+console.log('Motion defaults verified; boot remains IDLE.');
