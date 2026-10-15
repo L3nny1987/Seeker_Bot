@@ -10,15 +10,16 @@ Stand: 15.10.2026 · Autor: Lennard Schimmer
 - Cross-Platform-Testwerkzeug, CI-Konfiguration und Vorlagen für Beiträge.
 - Technische Grenzen, Sicherheitsmodell und Stand der Hardwareprüfung dokumentiert.
 - Gezielte Prüfung und ZIP-Export einer ausdrücklich definierten Quelltextmenge.
+- MIT-Lizenz für Quelltext, Dokumentation und Grafiken.
+- Git-Verlauf mit einheitlicher Autorenangabe und nachvollziehbaren Einzelschritten pro Entwicklungsstand.
 
 Es ist noch kein Remote-Repository eingerichtet und mit dieser Vorbereitung wurde nichts hochgeladen.
 
 ## Noch zu entscheiden oder nachzuweisen
 
-1. **Projektlizenz:** Der Autor legt fest, unter welcher Lizenz Quelltext, Dokumentation und Grafiken weitergegeben werden dürfen. Bis dahin enthält das Projekt keine ausdrückliche Open-Source-Lizenz.
-2. **Veröffentlichungsziel:** GitHub-/Git-URL und ein privater Kontaktweg für Sicherheitsfunde ergänzen.
-3. **Hardwarestatus:** Den aktuellen Stand über wiederholte Fahrten prüfen, bevor Zuverlässigkeits- oder Genauigkeitsangaben als reale Produkteigenschaft veröffentlicht werden.
-4. **CI auf dem Zielhost:** Der Workflow ist vorbereitet; ein tatsächlicher GitHub-Lauf steht erst nach einem Upload fest.
+1. **Veröffentlichungsziel:** GitHub-/Git-URL ergänzen und auf GitHub die private Schwachstellenmeldung aktivieren.
+2. **Hardwarestatus:** Den aktuellen Stand über wiederholte Fahrten prüfen, bevor Zuverlässigkeits- oder Genauigkeitsangaben als reale Produkteigenschaft veröffentlicht werden.
+3. **CI auf dem Zielhost:** Der Workflow ist vorbereitet; ein tatsächlicher GitHub-Lauf steht erst nach einem Upload fest.
 
 ## Geprüften Quelltext exportieren
 
@@ -27,9 +28,9 @@ python tools/check_publication.py
 python tools/export_source.py exports/Seeker_Bot_Public_Source.zip
 ```
 
-Der Export enthält eine SHA-256-Dateiliste. Er umfasst Quelltext, Konfiguration, Dokumentation und Vorlagen. Ausgeschlossen sind insbesondere `.git`, `.pio`, `managed_components`, `src/credentials.h`, Firmware, ELF-Dateien, lokale OTA-Images und Aufzeichnungen. Die Lizenzentscheidung bleibt auch im Export ausdrücklich offen, solange sie nicht getroffen wurde.
+Der Export enthält eine SHA-256-Dateiliste. Er umfasst Quelltext, Konfiguration, Dokumentation und Vorlagen. Ausgeschlossen sind insbesondere `.git`, `.pio`, `managed_components`, `src/credentials.h`, Firmware, ELF-Dateien, lokale OTA-Images und Aufzeichnungen. `LICENSE` ist Teil des Exports.
 
-Ein ZIP-Export kann als sauberer Ausgangspunkt für ein neues Repository verwendet werden. Wer stattdessen den vorhandenen Git-Verlauf veröffentlichen möchte, muss diesen zusätzlich überprüfen: Das Entfernen einer Datei aus dem aktuellen Stand entfernt frühere Git-Objekte nicht. Bei der aktuellen Untersuchung wurden die beiden lokalen WLAN-Zeichenketten in den erreichbaren Git-Blobs nicht gefunden. Das ist eine gezielte Prüfung dieser Zugangsdaten, keine vollständige Aussage über alle denkbaren früheren Geheimnisse.
+Ein ZIP-Export kann als sauberer Ausgangspunkt für ein neues Repository verwendet werden. Wer stattdessen den vorhandenen Git-Verlauf veröffentlicht, muss ihn zusätzlich prüfen: Das Entfernen einer Datei aus dem aktuellen Stand entfernt frühere Git-Objekte nicht. Vor der Veröffentlichung wurde jeder Commit des Verlaufs untersucht. Die beiden lokalen WLAN-Zeichenketten kommen in keinem Commit vor. Ältere Entwicklungsstände enthalten lokale Werkzeugpfade, einen festen COM-Port und eine private LAN-Adresse als Skript-Standardwert, aber keine Zugangsdaten. Das ist eine gezielte Prüfung, keine vollständige Aussage über alle denkbaren früheren Geheimnisse.
 
 ## Beschreibung für die spätere Repository-Seite
 

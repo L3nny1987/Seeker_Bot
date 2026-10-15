@@ -1,6 +1,6 @@
 # Beiträge zu Seeker Bot
 
-Autor und Maintainer: **Lennard Schimmer**. Die Projektlizenz ist noch offen; vor größeren externen Beiträgen die gewünschte Lizenzierung mit dem Maintainer klären.
+Autor und Maintainer: **Lennard Schimmer**. Das Projekt steht unter der [MIT-Lizenz](LICENSE); eingereichte Beiträge werden unter derselben Lizenz übernommen.
 
 ## Einrichten und ändern
 

@@ -644,7 +644,7 @@ Dies sind Entwicklungsmöglichkeiten, keine bereits eingebauten Funktionen. Ihre
 | Hauptsprache | C; HTML, CSS und JavaScript für das Dashboard |
 | Entwicklungsumgebung | PlatformIO mit ESP-IDF |
 | Rechenort im Betrieb | Kartierung und Navigation auf dem ESP32 |
-| Lizenz | Entscheidung durch den Autor noch offen; siehe Repository-README |
+| Lizenz | MIT; siehe `LICENSE` im Repository |
 
 ### 18.2 Begriffe
 

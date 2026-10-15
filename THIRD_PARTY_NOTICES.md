@@ -1,6 +1,6 @@
 # Drittanbieter und Grundlagen
 
-Die Projektlizenz von Seeker Bot ist noch offen. Diese Entscheidung ändert nicht die Lizenzen der verwendeten Drittanbieter.
+Seeker Bot selbst steht unter der [MIT-Lizenz](LICENSE). Das ändert nicht die Lizenzen der verwendeten Drittanbieter.
 
 ## cJSON
 
@@ -18,4 +18,4 @@ Primärquellen: [ESP-IDF-Repository](https://github.com/espressif/esp-idf), [Pla
 
 Die [LD20-Unterlagen](https://wiki.youyeetoo.com/en/Lidar/LD20) und das [LDROBOT SDK](https://github.com/ldrobotSensorTeam/ldlidar_sdk) dienen als Protokoll- und Anschlussreferenzen. Fremde Handbuchabbildungen oder SDK-Quelltexte werden durch diese Verweise nicht in das Projekt kopiert.
 
-Die Grafiken in `docs/assets/` wurden für die Projektdokumentation neu erstellt. Sie sind schematische Illustrationen und keine Herstellerzeichnungen, Fotografien oder Messnachweise. Ihre Weitergabe richtet sich nach der noch festzulegenden Projektlizenz.
+Die Grafiken in `docs/assets/` wurden für die Projektdokumentation neu erstellt. Sie sind schematische Illustrationen und keine Herstellerzeichnungen, Fotografien oder Messnachweise. Sie stehen wie der übrige Projektinhalt unter der MIT-Lizenz.

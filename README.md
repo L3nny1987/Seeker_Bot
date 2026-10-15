@@ -74,4 +74,4 @@ Die Netzwerkschnittstelle ist für ein vertrauenswürdiges lokales Netzwerk vorg
 
 Fehlerberichte mit Firmwarestand und reproduzierbaren Schritten sind willkommen. [CONTRIBUTING.md](CONTRIBUTING.md) beschreibt den Prüfablauf; [CHANGELOG.md](CHANGELOG.md) trennt die aktuellen Änderungen nach Version.
 
-**Die Projektlizenz ist noch nicht festgelegt.** Eine ausdrückliche Open-Source-Lizenz wird nach Entscheidung des Autors ergänzt. Drittanbieter behalten ihre jeweiligen Lizenzen; siehe [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Seeker Bot steht unter der [MIT-Lizenz](LICENSE). Drittanbieter behalten ihre jeweiligen Lizenzen; siehe [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

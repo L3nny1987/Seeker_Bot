@@ -10,7 +10,7 @@ Die Versionsabschnitte beschreiben den Entwicklungsstand des Quelltexts. Sie beh
 - Portable Testausführung ohne vorherigen Firmwarebau und vorbereitete GitHub-CI.
 - Lokale Pfade und Geräteadresse aus Veröffentlichungsdateien entfernt; Portwahl dem jeweiligen Aufbau überlassen.
 - Zugangsdatenvorlage, gezielte Veröffentlichungsprüfung und Quelltextexport ohne lokale Geheimnisse oder Firmware.
-- Projektlizenz noch zur Entscheidung durch den Autor offen.
+- MIT-Lizenz für Quelltext, Dokumentation und Grafiken.
 
 ## 0.3.3 – Verbindung und Speicher, 14.10.2026
 
