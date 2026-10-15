@@ -5,7 +5,7 @@
 **Ein autonomer Kettenroboter, der seine Umgebung selbst vermisst, eine Karte aufbaut und daraus Bewegungen ableitet.**
 
 Projektbuch von **Lennard Schimmer**  
-Firmwarestand **0.4.1** · Dokumentationsstand **15. Oktober 2026**
+Firmwarestand **0.4.2** · Dokumentationsstand **15. Oktober 2026**
 
 > Seeker Bot verbindet Robotik, Echtzeitsoftware und eine lokale Weboberfläche auf einem ESP32. Sein Reiz liegt in der vollständigen Verarbeitungskette: Aus einzelnen Laserabständen entsteht eine räumliche Vorstellung, aus dieser Vorstellung ein Weg und aus dem Weg eine kontrollierte Bewegung.
 
@@ -312,9 +312,11 @@ Dabei zählen beobachteter Freiraum und Zeitgrenzen. Die Existenz eines Ausweich
 
 Seit Firmware 0.4.0 lässt sich im Dashboard ein geschlossener Rundkurs mit 3 bis 64 Eckpunkten auf die Karte zeichnen. Der Roboter fährt zuerst den ersten Punkt an, folgt dann den Kanten der Reihe nach und kehrt am Ende jeder Runde zum Startpunkt zurück. Die Rundenzahl ist frei wählbar; alternativ läuft die Patrouille bis zu einem Stopp.
 
-Eine Route ist eine Absicht in Kartenkoordinaten. Deshalb gehört sie fest zu der Kartengeneration, auf der sie gezeichnet wurde. Nach einem Kartenreset passt sie nicht mehr und wird abgewiesen. Vor dem Start prüft die Firmware die Geometrie, den Betriebszustand und die Lokalisierung. Die Mittellinie jeder Kante muss durch bekannt freie Zellen verlaufen: Eine Route darf nicht durch Raum führen, den der Roboter noch nie gesehen hat. Seitlich davon darf innerhalb der halben Körperbreite plus 5 cm kein kartiertes Hindernis liegen. Unbekannte Zellen neben der Linie sind zulässig, denn die Kartenprüfung ist nur eine Plausibilitätsprüfung vor der Fahrt; jede einzelne Bewegung überwacht weiterhin die reaktive Korridorprüfung.
+Eine Route ist eine Absicht in Kartenkoordinaten. Deshalb gehört sie fest zu der Kartengeneration, auf der sie gezeichnet wurde. Nach einem Kartenreset passt sie nicht mehr und wird abgewiesen. Vor dem Start prüft die Firmware die Geometrie, den Betriebszustand und die Lokalisierung. Die Mittellinie jeder Kante muss durch bekannt freie Zellen verlaufen: Eine Route darf nicht durch Raum führen, den der Roboter noch nie gesehen hat. Seitlich davon darf keine kartierte Hinderniszelle näher liegen als die halbe Fahrkorridorbreite, mit der auch die lokale Navigation fährt; gemessen wird der exakte Abstand zwischen Linie und Zelle. Unbekannte Zellen neben der Linie sind zulässig, denn die Kartenprüfung ist nur eine Plausibilitätsprüfung vor der Fahrt; jede einzelne Bewegung überwacht weiterhin die reaktive Korridorprüfung.
 
-Die erste Version verlangte entlang jeder Kante ein 60 cm breites, vollständig bekannt freies Band, also den Drehkreis des Körpers auf ganzer Länge. Auf einer realen Wohnungskarte blieb dadurch nur rund ein Viertel der freien Fläche für Routen übrig, typische wandnahe Rundkurse waren unmöglich. Firmware 0.4.1 verlangt nur noch, was eine Geradeausfahrt braucht; Drehungen prüft weiterhin der Schwenkbereich in der lokalen Navigation.
+Die erste Version verlangte entlang jeder Kante ein 60 cm breites, vollständig bekannt freies Band, also den Drehkreis des Körpers auf ganzer Länge. Auf einer realen Wohnungskarte blieb dadurch nur rund ein Viertel der freien Fläche für Routen übrig, typische wandnahe Rundkurse waren unmöglich. Firmware 0.4.1 verlangt nur noch, was eine Geradeausfahrt braucht; Drehungen prüft weiterhin der Schwenkbereich in der lokalen Navigation. Firmware 0.4.2 gleicht den Abstand an die Fahrkorridorbreite der Navigation an. Zuvor markierte die Prüfung einen engen Durchgang rot, durch den der Roboter regelmäßig fuhr.
+
+Im Dashboard lassen sich einzelne Punkte nachträglich verschieben, einfügen und löschen. Die Prüfung läuft beim Ziehen mit und markiert die blockierende Zelle; Firmware und Dashboard verwenden dieselbe Rechnung.
 
 Während der Fahrt bleibt die lokale Korridorprüfung aus Abschnitt 8.4 aktiv. Die Route gibt die Richtung vor; ob der nächste Bewegungsabschnitt zulässig ist, entscheidet weiterhin die aktuelle Wahrnehmung. Ein Wegpunkt gilt im Abstand von 20 cm als erreicht oder sobald der Roboter die Querlinie durch den Punkt entlang der Kante überquert hat. Ein reiner Fangkreis verleitet eine grobe Antriebsregelung dazu, um den Punkt zu kreisen. Mehr als 60 cm seitliche Abweichung von der Kante, 45 Sekunden ohne Annäherung oder ein Kartenreset beenden die Route. Unsichere Lokalisierung pausiert sie, bis wieder drei verwertbare Scans vorliegen. Eine beendete Route startet nicht von selbst neu.
 
@@ -594,7 +596,7 @@ Eine bestandene Regression zeigt, dass definierte Eingaben das erwartete Verhalt
 | Prüfung | Ergebnis im dokumentierten Stand | Aussage |
 |---|---|---|
 | 10 C-Testprogramme | Bestanden | Geometrie, Strategien, Feedback, Scan-Builder, SLAM, Kartentransport und Routen für die Testfälle |
-| 7 JavaScript-Testprogramme | Bestanden | Decoder, Dashboard-Syntax, Polling, Asset, Defaults, Motorrichtungs-Mock und Routenoberfläche |
+| 7 JavaScript-Testprogramme | Bestanden | Decoder, Dashboard-Syntax, Polling, Asset, Defaults, Motorrichtungs-Mock, Routenoberfläche und Punkt-Editor |
 | ESP32-Releasebau | Erfolgreich | Der geprüfte Quelltext lässt sich für das Ziel übersetzen |
 | Synthetischer Gang mit 938 Scans | Kein Lokalisierungsverlust; maximale Abweichung 34 mm und 0,2° | Verhalten in der modellierten idealisierten Szene |
 | Synthetische Kurskorrektur | Begrenzte Impulse; kein Überschwingen in diesem Modell | Wirkung der Feedbacklogik unter den Testannahmen |
@@ -609,7 +611,7 @@ Die Testausgabe zeigt außerdem einen bewusst schwierigen Fall: Eine sehr schnel
 
 ### 16.2 Welche Fehlerklassen abgedeckt sind
 
-Am 15.10.2026 wurden die Host-Suite und der vollständige ESP32-Bau für Firmware 0.4.1 zusätzlich aus einem frischen Quelltextexport ausgeführt. Der Export enthielt keine vorhandenen Buildreste und wurde ausschließlich mit Platzhalter-Zugangsdaten gebaut. Alle 17 Testprogramme und der Neubau waren erfolgreich. Außerdem wurde jeder Commit des Git-Verlaufs einzeln gebaut und getestet. Der genaue Prüfungsumfang steht in `docs/VALIDATION.md`.
+Am 15.10.2026 wurden die Host-Suite und der vollständige ESP32-Bau für Firmware 0.4.2 zusätzlich aus einem frischen Quelltextexport ausgeführt. Der Export enthielt keine vorhandenen Buildreste und wurde ausschließlich mit Platzhalter-Zugangsdaten gebaut. Alle 17 Testprogramme und der Neubau waren erfolgreich. Außerdem wurde jeder Commit des Git-Verlaufs einzeln gebaut und getestet. Der genaue Prüfungsumfang steht in `docs/VALIDATION.md`.
 
 Die Prüfungen behandeln unter anderem fehlende Messbereiche, Körperbreiten, Vorzeichen, Scan-Umläufe und Zeitstempelüberläufe. Navigationstests prüfen Blockierung, Ausweichen, Wandfolge, Bug2, Kartenpfade, Hysterese und Stillstand bei schwacher Lokalisierung.
 
@@ -658,7 +660,7 @@ Dies sind Entwicklungsmöglichkeiten, keine bereits eingebauten Funktionen. Ihre
 | Projektname | Seeker Bot |
 | Autor | Lennard Schimmer |
 | Repository-/Firmwarebezeichner | `Seeker_Bot` / `seeker_bot` |
-| Dokumentierter Firmwarestand | 0.4.1 |
+| Dokumentierter Firmwarestand | 0.4.2 |
 | Zielplattform | ESP32, `esp32dev`, 4 MB Flash |
 | Hauptsprache | C; HTML, CSS und JavaScript für das Dashboard |
 | Entwicklungsumgebung | PlatformIO mit ESP-IDF |

@@ -4,7 +4,7 @@
 
 **Autonome Raumerkundung auf einem ESP32.** LiDAR und Gyroskop liefern die Umgebung, eine eigene SLAM-Implementierung baut die Karte, und der Roboter navigiert zu erreichbaren Zielen. Die Bedienung erfolgt im lokalen Browser.
 
-**Autor:** Lennard Schimmer · **Firmware:** 0.4.1 · **Status:** Entwicklungsprojekt mit Host-Regressionen; reale Langzeitabnahme des aktuellen Stands steht aus.
+**Autor:** Lennard Schimmer · **Firmware:** 0.4.2 · **Status:** Entwicklungsprojekt mit Host-Regressionen; reale Langzeitabnahme des aktuellen Stands steht aus.
 
 [![Firmware and host checks](https://github.com/L3nny1987/Seeker_Bot/actions/workflows/ci.yml/badge.svg)](https://github.com/L3nny1987/Seeker_Bot/actions/workflows/ci.yml)
 

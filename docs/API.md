@@ -1,6 +1,6 @@
 # HTTP-API und Datenformate
 
-Stand: Firmware 0.4.1. Basisadresse: `http://ROBOTER_IP`. Die Implementierung in `src/web_server.c` ist bei Abweichungen maßgeblich.
+Stand: Firmware 0.4.2. Basisadresse: `http://ROBOTER_IP`. Die Implementierung in `src/web_server.c` ist bei Abweichungen maßgeblich.
 
 ## Endpunkte
 
@@ -133,7 +133,7 @@ Eine Route ist ein geschlossener Polygonzug in Millimetern im Koordinatensystem 
 
 Die Paketlänge muss genau `32 + 4 * Punktanzahl` betragen. Geometrisch gültig ist eine Route, wenn alle Punkte innerhalb von ±6200 mm liegen, jede Kante 250–2000 mm lang ist, der Umfang mindestens 1 m beträgt und die Fläche nicht verschwindend klein ist.
 
-Vor dem Start prüft die Firmware zusätzlich: Roboter im IDLE ohne Bewegung, gültiges Token, passende Kartengeneration, Inbetriebnahme, gesunder LiDAR, sowie eine gültige, nicht als schwach markierte und frische Kartenpose. Die Mittellinie jeder Kante muss durch bekannt freie Zellen verlaufen (`route_unexplored`). Im Korridor aus halber Körperbreite plus 50 mm darf kein kartiertes Hindernis liegen (`route_obstacle`); unbekannte Zellen neben der Linie sind zulässig, weil die reaktive Korridorprüfung jede Bewegung überwacht. Den Korridorradius meldet der Status als `routeCorridorMm`. Eine Autoleistung unter der Mindestleistung ist erlaubt; die Ausgangsstufe hebt sie wie in allen Modi auf die Mindestleistung an.
+Vor dem Start prüft die Firmware zusätzlich: Roboter im IDLE ohne Bewegung, gültiges Token, passende Kartengeneration, Inbetriebnahme, gesunder LiDAR, sowie eine gültige, nicht als schwach markierte und frische Kartenpose. Die Mittellinie jeder Kante muss durch bekannt freie Zellen verlaufen (`route_unexplored`). Keine kartierte Hinderniszelle darf der Kante näher kommen als die halbe Fahrkorridorbreite aus den Einstellungen (`robotWidthMm / 2`, mindestens die halbe Körperbreite); gemessen wird der exakte Abstand zwischen Kante und Zellenquadrat (`route_obstacle`); unbekannte Zellen neben der Linie sind zulässig, weil die reaktive Korridorprüfung jede Bewegung überwacht. Den Korridorradius meldet der Status als `routeCorridorMm`. Eine Autoleistung unter der Mindestleistung ist erlaubt; die Ausgangsstufe hebt sie wie in allen Modi auf die Mindestleistung an.
 
 Fehlerantworten haben die Form `{"ok":false,"error":"..."}`. Ungültige Pakete und Geometrie liefern HTTP 400 (`route_invalid_packet`, `route_invalid_points`, `route_outside_map`, `route_point_spacing`, `route_too_small`), unpassende Zustände HTTP 409 (`route_busy`, `route_wrong_map`, `route_not_ready`, `route_unexplored`, `route_obstacle`, `route_controller_or_state`, `ota_busy`).
 

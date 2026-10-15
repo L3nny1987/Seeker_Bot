@@ -1,6 +1,6 @@
 # Seeker Bot einrichten
 
-**Autor:** Lennard Schimmer · **Stand:** Firmware 0.4.1
+**Autor:** Lennard Schimmer · **Stand:** Firmware 0.4.2
 
 ## 1. Voraussetzungen
 
@@ -68,14 +68,14 @@ Routen beziehen sich immer auf die aktuelle Karte. Zuerst die Umgebung so weit k
 
 1. Im Tab „Fahren“ die Steuerung übernehmen; der Roboter steht im Leerlauf.
 2. Im Tab „Karte“ unter „Routen · geschlossener Rundkurs“ auf „Neue Route zeichnen“ klicken und die Eckpunkte nacheinander in die Karte tippen oder eine Linie ziehen. Benachbarte Punkte müssen mindestens 25 cm auseinanderliegen; lange Kanten teilt das Dashboard selbst.
-3. „Kreis schließen“ verbindet den letzten mit dem ersten Punkt; endet eine gezogene Linie nahe am grünen Start, schließt sie sich selbst. „Letzten Punkt entfernen“ und „Verwerfen“ korrigieren den Entwurf. Ein **rot markierter Abschnitt** führt durch unerkundeten Bereich oder zu nah an einem Hindernis vorbei: diesen Bereich erst kartieren oder die Route dort anders führen.
+3. „Kreis schließen“ verbindet den letzten mit dem ersten Punkt; endet eine gezogene Linie nahe am grünen Start, schließt sie sich selbst. „Letzten Punkt entfernen“ und „Verwerfen“ korrigieren den Entwurf. Ein **rot markierter Abschnitt** führt durch unerkundeten Bereich oder zu nah an einem Hindernis vorbei; die blockierende Zelle ist rot umkreist, der Hinweis nennt den Abstand. Mit **„Punkte bearbeiten“** lässt sich die Route nachträglich anpassen: Punkt antippen und ziehen, ＋ in der Kantenmitte fügt einen Punkt ein, „Ausgewählten Punkt löschen“ oder die Entf-Taste entfernt ihn. Die Prüfung läuft beim Ziehen mit; „Fertig“ übernimmt die Änderung. Das funktioniert auch für gemerkte und zuletzt gefahrene Routen.
 4. Anzahl vollständiger Runden eintragen oder „∞ Bis zum Stopp wiederholen“ wählen. „Tempo mit Streckenerfahrung steigern“ lässt gerade, mehrfach sauber befahrene Kanten schneller werden; Kurven bleiben langsam.
 5. Optional mit Namen über „Route merken“ im Browser speichern. Gemerkte Routen gelten nur für die Karte, auf der sie gezeichnet wurden.
 6. „Route starten“. Der Roboter fährt zuerst den ersten Punkt an und folgt dann dem Rundkurs.
 
 Unter den Startknöpfen steht, was zum Start noch fehlt, etwa Steuerung, Inbetriebnahme, sichere Lokalisierung oder ein geschlossener Rundkurs.
 
-Die Firmware prüft beim Start erneut: Die Mittellinie jeder Kante muss durch bekannt freie Fläche laufen, und im Körperkorridor (halbe Körperbreite plus 5 cm) darf kein kartiertes Hindernis liegen. Unsichere Lokalisierung oder eine inzwischen zurückgesetzte Karte verhindern den Start ebenfalls. Endet eine Route, nennt das Dashboard den Grund; die Bedeutung der Fehlercodes steht in [API.md](API.md#patrouillenrouten). „Route stoppen“ oder jeder andere Stopp beendet die Fahrt; sie wird nicht selbstständig fortgesetzt.
+Die Firmware prüft beim Start erneut: Die Mittellinie jeder Kante muss durch bekannt freie Fläche laufen, und keine kartierte Hinderniszelle darf näher als die halbe Fahrkorridorbreite aus den Einstellungen liegen (Standard 10 cm). Unsichere Lokalisierung oder eine inzwischen zurückgesetzte Karte verhindern den Start ebenfalls. Endet eine Route, nennt das Dashboard den Grund; die Bedeutung der Fehlercodes steht in [API.md](API.md#patrouillenrouten). „Route stoppen“ oder jeder andere Stopp beendet die Fahrt; sie wird nicht selbstständig fortgesetzt.
 
 ## 7. Parameter ändern
 

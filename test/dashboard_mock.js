@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const state = { mode: 'idle', reason: 'mock_only', controller: false,
   commissioned: false, lidarHealthy: true, drive: 0, turn: 0, coverage: 360,
   scanAgeMs: 25, frontMm: 2000, rearMm: 2500, packets: 1234, crcErrors: 0,
-  heap: 140000, uptime: 60, version: '0.4.1 MOCK ONLY', manualLimit: 100, lidarFrontDeg: 180 };
+  heap: 140000, uptime: 60, version: '0.4.2 MOCK ONLY', manualLimit: 100, lidarFrontDeg: 180 };
 let scanSequence = 0;
 state.settings={manualStopMm:200,manualRotateMm:200,autoStopMm:500,autoRotateMm:550,
  autoSlowMm:1200,autoDrivePercent:90,autoTurnPercent:100,autoSlowPercent:85,rampMs:1000,

@@ -13,6 +13,12 @@ Die Versionsabschnitte beschreiben den Entwicklungsstand des Quelltexts. Sie beh
 - MIT-Lizenz für Quelltext, Dokumentation und Grafiken.
 - Dokumentation, API-Beschreibung und Testangaben auf Firmware 0.4.0 abgeglichen.
 
+## 0.4.2 – Enge Durchgänge und Punkt-Editor, 15.10.2026
+
+- Die Freiraumprüfung verwendet dieselbe halbe Korridorbreite wie die Navigation (`robotWidthMm / 2`, Standard 10 cm, mindestens halbe Körperbreite) statt halber Körperbreite plus 5 cm. Gemessen wird der exakte Abstand zwischen Kante und Hinderniszelle, nicht ein auf ganze Zellen aufgerundeter Kreis. Ein enger Durchgang, den der Roboter regelmäßig befährt, wurde bisher bei rund 11 cm Wandabstand rot markiert. Auf der ersten realen Karte sind nun 69 % statt 62 % der freien Fläche für Routenlinien nutzbar.
+- „Punkte bearbeiten“: Punkte verschieben, über ＋ in der Kantenmitte einfügen und löschen; nummerierte Punkte, Live-Prüfung beim Ziehen und markierte Hinderniszelle mit Abstand.
+- Firmware- und Dashboard-Prüfung werden mit 300 Zufallsrouten auf einer Zufallskarte gegeneinander getestet.
+
 ## 0.4.1 – Routen startbar und robuster, 15.10.2026
 
 - Routenstart wurde abgewiesen, sobald die Auto-Leistung unter der Mindestleistung des Fahrmotors lag. Diese Sperre entfällt; die Ausgangsstufe hebt jeden Fahrbefehl ohnehin auf die Mindestleistung.
