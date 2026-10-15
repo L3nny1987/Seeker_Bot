@@ -13,6 +13,16 @@ Die Versionsabschnitte beschreiben den Entwicklungsstand des Quelltexts. Sie beh
 - MIT-Lizenz für Quelltext, Dokumentation und Grafiken.
 - Dokumentation, API-Beschreibung und Testangaben auf Firmware 0.4.0 abgeglichen.
 
+## 0.4.1 – Routen startbar und robuster, 15.10.2026
+
+- Routenstart wurde abgewiesen, sobald die Auto-Leistung unter der Mindestleistung des Fahrmotors lag. Diese Sperre entfällt; die Ausgangsstufe hebt jeden Fahrbefehl ohnehin auf die Mindestleistung.
+- Freiraumprüfung körpergerecht: Die Mittellinie muss durch bekannt freie Fläche führen, im Korridor aus halber Körperbreite plus 5 cm darf kein kartiertes Hindernis liegen. Bisher war entlang jeder Kante ein 60 cm breites, vollständig bekannt freies Band nötig. Auf einer realen Karte von 8,7 m² steigt die nutzbare Fläche damit von 27 % auf 62 %.
+- Genauere Startfehler `route_unexplored` und `route_obstacle` statt `route_unknown_or_blocked`.
+- Wegpunkte gelten auch beim Durchfahren entlang der Kante als erreicht; Fangradius 20 statt 12 cm, Abweichungsgrenze 60 statt 40 cm.
+- Die Anfahrt zum Startpunkt endet nicht mehr als „unerreichbar“, wenn der Kartenpfad sein leicht verschobenes Ziel erreicht.
+- Dashboard: rot markierter Problemabschnitt, Hinweis „Zum Start fehlt“, Schrittanleitung und verständliche Abbruchgründe.
+- Host-Test einer verrauschten Patrouille mit den realen Einstellungen des Roboters.
+
 ## 0.4.0 – Patrouillenrouten, 15.10.2026
 
 - Geschlossene Rundkurse mit 3 bis 64 Punkten im Dashboard auf der Karte zeichnen, pro Karte im Browser merken und 1…n-mal oder bis zum Stopp abfahren.

@@ -27,8 +27,8 @@ PowerShell-Einstieg mit identischer Suite:
 | `map_transport_test` | RLE, Rundlauf, Grenzen, Rauschkarten und Decoder-Fixtures |
 | `ld20_scan_test` | Vollständige Umläufe, Zeitüberlauf, Paketlücken und Erholung |
 | `slam_test` | Synthetische Szenen, Gyro, Verlust, Wiederfinden und Mehrdeutigkeit |
-| `route_runner_test` | Routengeometrie, Rundenzählung, frische Posen, Kartenbindung, Bewertung, Leistungsgrenzen und Paketprüfung |
-| `route_navigation_test` | Geschlossene synthetische Patrouillenfahrt mit Rückmeldung, Ausgabestufe und Lokalisierungspause |
+| `route_runner_test` | Routengeometrie, Rundenzählung, Durchfahren von Wegpunkten, Übergabe nach der Anfahrt, frische Posen, Kartenbindung, Bewertung, effektive Leistung, Körperkorridor und Paketprüfung |
+| `route_navigation_test` | Geschlossene synthetische Patrouillenfahrt mit Rückmeldung, Ausgabestufe und Lokalisierungspause; verrauschtes Quadrat mit den Einstellungen des realen Roboters |
 
 Die sieben JavaScript-Programme prüfen Dashboard-Asset, Kartenformat, Standardwerte, Motorrichtungen mit gemockter Hardware, Polling, JavaScript-Syntax und die Routenoberfläche (Zeichnen, Korridorprüfung, C-kompatible Pakete und Kartenreset).
 

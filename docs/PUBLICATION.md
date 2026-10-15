@@ -13,13 +13,12 @@ Stand: 15.10.2026 · Autor: Lennard Schimmer
 - MIT-Lizenz für Quelltext, Dokumentation und Grafiken.
 - Git-Verlauf mit einheitlicher Autorenangabe und nachvollziehbaren Einzelschritten pro Entwicklungsstand.
 
-Es ist noch kein Remote-Repository eingerichtet und mit dieser Vorbereitung wurde nichts hochgeladen.
+Das Repository ist unter [github.com/L3nny1987/Seeker_Bot](https://github.com/L3nny1987/Seeker_Bot) veröffentlicht. Der erste GitHub-Actions-Lauf (Host-Prüfungen, Veröffentlichungscheck, Firmwarebau) war erfolgreich.
 
 ## Noch zu entscheiden oder nachzuweisen
 
-1. **Veröffentlichungsziel:** GitHub-/Git-URL ergänzen und auf GitHub die private Schwachstellenmeldung aktivieren.
+1. **Privater Meldekanal:** Auf GitHub unter Settings → Security die private Schwachstellenmeldung aktivieren.
 2. **Hardwarestatus:** Den aktuellen Stand über wiederholte Fahrten prüfen, bevor Zuverlässigkeits- oder Genauigkeitsangaben als reale Produkteigenschaft veröffentlicht werden.
-3. **CI auf dem Zielhost:** Der Workflow ist vorbereitet; ein tatsächlicher GitHub-Lauf steht erst nach einem Upload fest.
 
 ## Geprüften Quelltext exportieren
 

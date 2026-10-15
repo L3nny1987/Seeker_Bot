@@ -1,6 +1,6 @@
 # HTTP-API und Datenformate
 
-Stand: Firmware 0.4.0. Basisadresse: `http://ROBOTER_IP`. Die Implementierung in `src/web_server.c` ist bei Abweichungen maßgeblich.
+Stand: Firmware 0.4.1. Basisadresse: `http://ROBOTER_IP`. Die Implementierung in `src/web_server.c` ist bei Abweichungen maßgeblich.
 
 ## Endpunkte
 
@@ -82,7 +82,7 @@ Die gültigen Bereiche und Beziehungen stehen in `src/motion_settings.h`. Beispi
 
 ## Status und Scan
 
-Der Status enthält unter anderem `version`, `mode`, `reason`, `controller`, `linkOk`, `lidarHealthy`, `coverage`, `scanAgeMs`, `scanSequence`, Motorwerte und Navigationsdetails. Für die Lokalisierung sind `poseValid`, `poseX`, `poseY`, `poseDeg`, `poseAgeMs`, `slamQuality`, `slamLost`, `slamWeak` und `slamDegenerate` relevant. Speicherdiagnose umfasst `heap`, `minHeap`, `heapInternal`, `heapLargest` und `allocFailures`. Routen melden `mapGeneration`, `routeRevision`, `routeActive`, `routeConfigured`, `routeApproaching`, `routeAdaptive`, `routeLaps`, `routeCompleted`, `routeLearnedLaps`, `routePoints`, `routeTarget`, `routeConfidence` und `routePower`; während einer Route ist `strategy` gleich `route`.
+Der Status enthält unter anderem `version`, `mode`, `reason`, `controller`, `linkOk`, `lidarHealthy`, `coverage`, `scanAgeMs`, `scanSequence`, Motorwerte und Navigationsdetails. Für die Lokalisierung sind `poseValid`, `poseX`, `poseY`, `poseDeg`, `poseAgeMs`, `slamQuality`, `slamLost`, `slamWeak` und `slamDegenerate` relevant. Speicherdiagnose umfasst `heap`, `minHeap`, `heapInternal`, `heapLargest` und `allocFailures`. Routen melden `mapGeneration`, `routeRevision`, `routeActive`, `routeConfigured`, `routeApproaching`, `routeAdaptive`, `routeLaps`, `routeCompleted`, `routeLearnedLaps`, `routePoints`, `routeTarget`, `routeConfidence`, `routePower` (effektive Fahrleistung in %) und `routeCorridorMm`; während einer Route ist `strategy` gleich `route`.
 
 `GET /api/scan` liefert `fresh`, `rpm`, `sequence`, `ageMs` und `distance` mit 360 Werten. Entfernungen sind Millimeter; 0 bedeutet kein gültiger Messwert. Index 0 zeigt nach vorne, 90 nach rechts, 180 nach hinten, 270 nach links. `frontMm` und ähnliche Rohabstände im Status sind ab LiDAR gemessen; `navCenterMm` und `clearRearMm` sind freie Fahrstrecken der Körperkante.
 
@@ -133,11 +133,11 @@ Eine Route ist ein geschlossener Polygonzug in Millimetern im Koordinatensystem 
 
 Die Paketlänge muss genau `32 + 4 * Punktanzahl` betragen. Geometrisch gültig ist eine Route, wenn alle Punkte innerhalb von ±6200 mm liegen, jede Kante 250–2000 mm lang ist, der Umfang mindestens 1 m beträgt und die Fläche nicht verschwindend klein ist.
 
-Vor dem Start prüft die Firmware zusätzlich: Roboter im IDLE ohne Bewegung, gültiges Token, passende Kartengeneration, Inbetriebnahme, gesunder LiDAR, eine gültige, nicht als schwach markierte und frische Kartenpose sowie eine Autoleistung oberhalb der Mindestleistung. Entlang jeder Kante muss ein Korridor für die Körperkontur plus Reserve aus bekannt freien Kartenzellen bestehen; unbekannte Zellen zählen nicht als frei.
+Vor dem Start prüft die Firmware zusätzlich: Roboter im IDLE ohne Bewegung, gültiges Token, passende Kartengeneration, Inbetriebnahme, gesunder LiDAR, sowie eine gültige, nicht als schwach markierte und frische Kartenpose. Die Mittellinie jeder Kante muss durch bekannt freie Zellen verlaufen (`route_unexplored`). Im Korridor aus halber Körperbreite plus 50 mm darf kein kartiertes Hindernis liegen (`route_obstacle`); unbekannte Zellen neben der Linie sind zulässig, weil die reaktive Korridorprüfung jede Bewegung überwacht. Den Korridorradius meldet der Status als `routeCorridorMm`. Eine Autoleistung unter der Mindestleistung ist erlaubt; die Ausgangsstufe hebt sie wie in allen Modi auf die Mindestleistung an.
 
-Fehlerantworten haben die Form `{"ok":false,"error":"..."}`. Ungültige Pakete und Geometrie liefern HTTP 400 (`route_invalid_packet`, `route_invalid_points`, `route_outside_map`, `route_point_spacing`, `route_too_small`), unpassende Zustände HTTP 409 (`route_busy`, `route_wrong_map`, `route_not_ready`, `route_power_range`, `route_unknown_or_blocked`, `route_controller_or_state`, `ota_busy`).
+Fehlerantworten haben die Form `{"ok":false,"error":"..."}`. Ungültige Pakete und Geometrie liefern HTTP 400 (`route_invalid_packet`, `route_invalid_points`, `route_outside_map`, `route_point_spacing`, `route_too_small`), unpassende Zustände HTTP 409 (`route_busy`, `route_wrong_map`, `route_not_ready`, `route_unexplored`, `route_obstacle`, `route_controller_or_state`, `ota_busy`).
 
-Während der Fahrt bricht die Route bei Kartenreset (`route_map_changed`), mehr als 400 mm Abstand zur aktuellen Kante (`route_deviation`) oder 45 s ohne Annäherung (`route_no_progress`) ab. Unsichere Lokalisierung pausiert sie. Jeder Stopp des Robot Managers beendet sie, etwa `stop` oder `estop` über `/api/control` oder ein Verbindungsverlust; eine beendete Route startet nicht selbstständig neu.
+Ein Wegpunkt gilt als erreicht, sobald der Roboter weniger als 200 mm entfernt ist oder die Querlinie durch den Punkt entlang der Kante überquert hat; für den Startpunkt gelten 300 mm. Findet der Kartenpfad zum Startpunkt keinen Weg, endet die Route mit `route_start_unreachable`. Während der Fahrt bricht die Route bei Kartenreset (`route_map_changed`), mehr als 600 mm Abstand zur aktuellen Kante (`route_deviation`), 45 s ohne Annäherung (`route_no_progress`) oder ohne weiteren Navigationsweg (`route_unreachable`) ab. Unsichere Lokalisierung pausiert sie. Jeder Stopp des Robot Managers beendet sie, etwa `stop` oder `estop` über `/api/control` oder ein Verbindungsverlust; eine beendete Route startet nicht selbstständig neu.
 
 `GET /api/route` liefert `configured`, `active`, `generation`, `laps`, `completed`, `learnedLaps`, `adaptive`, `target`, `approaching`, `points` als `[[x,y],…]` und `scores` mit einer Bewertung 0–100 je ankommender Kante. Die Bewertung ist eine Heuristik aus sauber befahrenen Runden, keine Wahrscheinlichkeit.
 

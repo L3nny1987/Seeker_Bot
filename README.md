@@ -4,7 +4,9 @@
 
 **Autonome Raumerkundung auf einem ESP32.** LiDAR und Gyroskop liefern die Umgebung, eine eigene SLAM-Implementierung baut die Karte, und der Roboter navigiert zu erreichbaren Zielen. Die Bedienung erfolgt im lokalen Browser.
 
-**Autor:** Lennard Schimmer · **Firmware:** 0.4.0 · **Status:** Entwicklungsprojekt mit Host-Regressionen; reale Langzeitabnahme des aktuellen Stands steht aus.
+**Autor:** Lennard Schimmer · **Firmware:** 0.4.1 · **Status:** Entwicklungsprojekt mit Host-Regressionen; reale Langzeitabnahme des aktuellen Stands steht aus.
+
+[![Firmware and host checks](https://github.com/L3nny1987/Seeker_Bot/actions/workflows/ci.yml/badge.svg)](https://github.com/L3nny1987/Seeker_Bot/actions/workflows/ci.yml)
 
 [Projektbuch lesen](docs/PROJEKTBUCH.md) · [Einrichten](docs/GETTING_STARTED.md) · [Verkabelung](docs/WIRING.md) · [API](docs/API.md) · [Fehlersuche](docs/TROUBLESHOOTING.md)
 
@@ -63,7 +65,7 @@ python tools/check_publication.py
 pio run -e seeker_bot
 ```
 
-Die Host-Suite benötigt weder Roboter noch WLAN-Zugangsdaten. Sie umfasst 10 C- und 7 JavaScript-Testprogramme. Die mitgelieferte GitHub-Actions-Konfiguration führt die Prüfungen und einen Firmwarebau mit Platzhalter-Zugangsdaten aus. Ein GitHub-CI-Ergebnis wird erst nach Veröffentlichung verfügbar.
+Die Host-Suite benötigt weder Roboter noch WLAN-Zugangsdaten. Sie umfasst 10 C- und 7 JavaScript-Testprogramme. GitHub Actions führt bei jedem Push die Prüfungen und einen Firmwarebau mit Platzhalter-Zugangsdaten aus.
 
 ## Aktueller Umfang
 
