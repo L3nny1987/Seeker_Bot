@@ -1,134 +1,63 @@
-# Seeker_Bot – Verkabelung
+# Seeker Bot – Verkabelung
 
-## Komponenten
+Die verbindliche Firmwarebelegung steht in `components/seeker_config/include/seeker_pins.h`. Diese Anleitung beschreibt den Aufbau mit Fahrt- und Drehachse.
 
-- ESP32 (esp32dev / WROOM-32)
-- L298N Dual-H-Bridge Motortreiber
-- 2× DC-Motor (Panzerketten-Antrieb)
-- FHL-LD20 LiDAR
-- Motor-Netzteil
-- 5-V-Versorgung für LiDAR/ESP32
+## Motorachsen am L298N
 
----
+| Funktion | ESP32 | L298N |
+|---|---:|---|
+| Fahrt-PWM | GPIO 25 | ENA |
+| Fahrt-Richtung | GPIO 26 / 27 | IN1 / IN2 |
+| Dreh-PWM | GPIO 14 | ENB |
+| Dreh-Richtung | GPIO 32 / 33 | IN3 / IN4 |
+| Bezugspotential | GND | GND |
 
-## Kinematik
+ENA- und ENB-Jumper für die PWM-Steuerung entfernen. Fahrmotor an OUT1/OUT2, Drehmotor an OUT3/OUT4 anschließen. Dieses Chassis besitzt keine direkt angesteuerten linken und rechten Kettenmotoren.
 
-Der Roboter hat **keinen** klassischen Differentialantrieb:
-
-| Motor | L298N-Kanal | Funktion |
-|---|---|---|
-| Motor A | ENA / IN1 / IN2 / OUT1+OUT2 | **Fahrt** vorwärts / rückwärts |
-| Motor B | ENB / IN3 / IN4 / OUT3+OUT4 | **Drehung** links / rechts |
-
-Beide Achsen sind unabhängig und können gleichzeitig angesteuert werden
-(Kurvenfahrt = Fahrt ≠ 0 **und** Drehung ≠ 0).
-
-Bestätigte Richtungen anhand des funktionierenden Motortests:
-- Vorwärts: IN1 HIGH, IN2 LOW; rückwärts umgekehrt.
-- Links: IN3 HIGH, IN4 LOW; rechts umgekehrt.
-- API: Fahrt positiv = vorwärts, Drehung negativ = links.
-    Deshalb ist `SEEKER_TURN_INVERTED = 1` gesetzt.
-- Die Firmware regelt ENA/ENB weiterhin per PWM; bei 100 % dauerhaft HIGH.
-    Stopps und Not-Aus schalten beide PWM-Ausgänge ab.
-
----
-
-## 1. ESP32 → L298N
-
-| ESP32 | L298N | Funktion |
-|---|---|---|
-| GPIO 25 | ENA | Geschwindigkeit Fahrmotor (PWM) |
-| GPIO 26 | IN1 | Richtung Fahrmotor |
-| GPIO 27 | IN2 | Richtung Fahrmotor |
-| GPIO 32 | IN3 | Richtung Drehmotor |
-| GPIO 33 | IN4 | Richtung Drehmotor |
-| GPIO 14 | ENB | Geschwindigkeit Drehmotor (PWM) |
-| GND | GND | Gemeinsame Masse |
-
-### ENA / ENB
-
-Für Geschwindigkeitsregelung über den ESP32:
-
-- Jumper auf **ENA entfernen**
-- Jumper auf **ENB entfernen**
-- ENA → GPIO 25
-- ENB → GPIO 14
-
----
-
-## 2. Motoren → L298N
-
-- Fahrmotor: Kabel 1 → **OUT1**, Kabel 2 → **OUT2**
-- Drehmotor: Kabel 1 → **OUT3**, Kabel 2 → **OUT4**
-
-Falls ein Motor falsch herum läuft: Kabel tauschen **oder**
-`SEEKER_DRIVE_INVERTED` / `SEEKER_TURN_INVERTED` in
-`components/seeker_config/include/seeker_pins.h` auf `1` setzen.
-
----
-
-## 3. Motorversorgung → L298N
-
-- Netzteil PLUS → **L298N VIN / +12V**
-- Netzteil MINUS → **L298N GND**
-
-Die DC-Motoren werden **nicht über den ESP32** versorgt.
-
----
-
-## 4. FHL-LD20 LiDAR
-
-| LiDAR-Kabel | Anschluss |
+| Befehl | Richtungssignale |
 |---|---|
-| Schwarz | +5 V |
-| Grün | GND |
-| Weiß | GPIO 18, **S**-Reihe – Datenleitung (LiDAR TX → ESP32 RX) |
-| Rot | **OFFEN LASSEN** – PWM-Eingang |
+| Vorwärts | IN1 HIGH, IN2 LOW |
+| Rückwärts | IN1 LOW, IN2 HIGH |
+| Links | IN3 HIGH, IN4 LOW |
+| Rechts | IN3 LOW, IN4 HIGH |
 
-### Korrektur anhand der Herstellerunterlagen
+API: positive Fahrt ist vorwärts; negative Drehung ist links. Aktuell sind `SEEKER_DRIVE_INVERTED = 0` und `SEEKER_TURN_INVERTED = 1` gesetzt. Bei einem anderen Aufbau angehoben prüfen.
 
-- Quelle: https://wiki.youyeetoo.com/en/Lidar/LD20, Abschnitt 3.1.1.
-- Die abgebildete Variante: Schwarz = +5 V, Grün = GND, Rot = PWM-Eingang,
-  Weiß = Datenleitung zum Controller-RX.
-- Der Sensor sendet nach stabilem Start selbstständig mit 230400 Baud, 8N1.
-- Umbauten nur stromlos. Am Expansion-Board D18/**S**, nicht D18/V oder G.
+## LD20 LiDAR
 
-Rot bleibt offen; Weiß wird mit dem RX des ESP32 verbunden.
-
-Einbaukalibrierung: Rohwinkel 180° zeigt nach vorne
-(`SEEKER_LIDAR_FRONT_DEG = 180`, Winkel wachsen im Uhrzeigersinn).
-Radar und Hinderniserkennung verwenden dieselbe Ausrichtung.
-
-### Offener Punkt
-
-Die bisherige Annahme Rot = UART war falsch für die Herstellerabbildung.
-Der Hersteller warnt vor abweichenden Kabelchargen. Bei einem anderen Kabelsatz
-nach Stecker-Pinbelegung statt allein nach Farbe anschließen:
-1 = PWM/RX (Eingang), 2 = GND, 3 = TX (Ausgang), 4 = VCC (5 V).
-Steckerorientierung anhand der Herstellerzeichnung prüfen.
-
----
-
-## 5. Gemeinsame Masse
-
-ESP32 GND
-↳ L298N GND
-↳ LiDAR GND (grün)
-↳ Motor-Netzteil MINUS
-
----
-
-## 6. Komplette GPIO-Belegung
-
-| GPIO | Verwendung |
+| Anschluss | ESP32 / Versorgung |
 |---|---|
-| GPIO 14 | L298N ENB (Drehmotor PWM) |
-| GPIO 18 | LiDAR Weiß (UART2 RX) |
-| GPIO 25 | L298N ENA (Fahrmotor PWM) |
-| GPIO 26 | L298N IN1 |
-| GPIO 27 | L298N IN2 |
-| GPIO 32 | L298N IN3 |
-| GPIO 33 | L298N IN4 |
+| LiDAR TX | GPIO 18, UART2 RX |
+| VCC | Geeignete stabile 5-V-Versorgung |
+| GND | Gemeinsame Masse |
+| PWM/RX-Eingang | Im aktuellen Aufbau offen |
 
-Freie Reserve-Pins für Erweiterungen: GPIO 4, 5, 13, 16, 17, 19, 21, 22, 23.
-Nicht verwenden: GPIO 6–11 (Flash), GPIO 34–39 (nur Eingang).
+Der vorhandene Kabelsatz verwendet Schwarz für 5 V, Grün für GND, Weiß für TX und Rot für PWM. Chargen können abweichen. Nach Steckerbelegung und [Herstellerzeichnung](https://wiki.youyeetoo.com/en/Lidar/LD20) prüfen: 1 PWM/RX, 2 GND, 3 TX, 4 VCC. Die Steckerorientierung beachten.
+
+Nur stromlos umverdrahten. An einem Expansion-Board gehört die Datenleitung an D18/Signal. UART: 230400 Baud, 8N1, 3,3-V-TTL-Datenpegel. Der ESP32 empfängt; seine UART-TX-Leitung bleibt unbelegt.
+
+Standardausrichtung: Rohwinkel 180° zeigt nach vorne, Winkel wachsen im Uhrzeigersinn. Ein Hindernis vor dem Chassis muss im Radar ebenfalls vorne erscheinen.
+
+## MPU6050 / GY-521
+
+| Modulanschluss | ESP32 |
+|---|---|
+| VCC | 3V3, Eignung des konkreten Moduls prüfen |
+| GND | GND |
+| SDA / SCL | GPIO 21 / 22 |
+| AD0 | GND/offen für 0x68; 0x69 wird ebenfalls erkannt |
+| INT | Nicht verwendet |
+
+I²C arbeitet mit 400 kHz. Die Firmware liest den FIFO; ein Interruptkabel ist nicht erforderlich. Nach dem Einschalten ungefähr zwei Sekunden ruhig halten. Der Sensor muss starr befestigt sein. Die Hochachse wird aus der Schwerkraft bestimmt, sodass eine feste abweichende Einbaulage berücksichtigt werden kann.
+
+## Versorgung und Masse
+
+Motorversorgung PLUS an den Versorgungseingang des L298N, MINUS an GND. Die Motorspannung muss zu Motoren und Modul passen; eine Beschriftung „12V“ allein bestimmt sie nicht. Motoren werden nicht aus einem ESP32-GPIO oder dessen 3V3-Pin versorgt.
+
+Logik und LiDAR benötigen geeignete geregelte Versorgung. Die Nutzung eines L298N-Reglerjumpers hängt vom Modul ab. Gemeinsame Masse verbindet ESP32, L298N, LiDAR, IMU und den Bezug der Motorversorgung. Eine zugängliche physische Abschaltung der Motorversorgung unterstützt die Inbetriebnahme.
+
+## Geometrie und erste Prüfung
+
+Aktueller Körper relativ zum LiDAR: 100 mm nach vorne, 200 mm nach hinten, 70 mm zu jeder Seite. Standard-Fahrkorridor: 200 mm. Diese Werte vor autonomen Fahrten am tatsächlichen Chassis prüfen.
+
+GPIO 21/22 sind durch die IMU belegt. Weitere Anschlüsse unter Berücksichtigung von Flash-Pins, reinen Eingängen, Boot-Strapping und der konkreten ESP32-Platine auswählen.

@@ -1,0 +1,21 @@
+/* Optional styling for Markdown-to-HTML/PDF tools. No remote assets. */
+@page { size: A4; margin: 20mm 19mm; }
+:root { color-scheme: light; }
+body { font-family: "Segoe UI", "DejaVu Sans", Arial, sans-serif; color: #14243c; font-size: 10.5pt; line-height: 1.58; max-width: 920px; margin: 0 auto; }
+h1 { font-size: 30pt; line-height: 1.15; }
+h2 { font-size: 18pt; margin-top: 1.8em; padding-bottom: .25em; border-bottom: 1px solid #dce4f0; }
+h3 { font-size: 12.5pt; margin-top: 1.3em; }
+h1, h2, h3 { break-after: avoid; page-break-after: avoid; }
+p, li { orphans: 3; widows: 3; }
+a { color: #2853cb; text-decoration: none; overflow-wrap: anywhere; }
+img { display: block; max-width: 100%; height: auto; margin: 1em auto; break-inside: avoid; }
+blockquote { border-left: 3px solid #138a81; padding: .2em 1em; margin: 1em 0; background: #f0f8f7; }
+table { width: 100%; border-collapse: collapse; font-size: 9pt; margin: 1em 0; }
+th, td { border: 1px solid #dce4f0; padding: .5em .6em; vertical-align: top; }
+th { background: #edf2fa; text-align: left; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; page-break-inside: avoid; }
+pre { background: #f1f4f9; padding: .8em; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 8.5pt; break-inside: avoid; }
+code { font-family: Consolas, "DejaVu Sans Mono", monospace; font-size: .88em; }
+hr { border: 0; border-top: 1px solid #dce4f0; margin: 2em 0; }
+@media print { body { max-width: none; } }

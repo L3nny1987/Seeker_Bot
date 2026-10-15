@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="760" viewBox="0 0 1600 760">
+<rect width="1600" height="760" fill="#0b1528"/>
+<polyline points="810,42 810,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="854,42 854,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="898,42 898,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="942,42 942,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="986,42 986,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="1030,42 1030,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="1074,42 1074,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="1118,42 1118,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="1162,42 1162,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="1206,42 1206,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="1250,42 1250,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="1294,42 1294,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="1338,42 1338,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="1382,42 1382,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="1426,42 1426,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="1470,42 1470,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="1514,42 1514,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="1558,42 1558,700" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="810,42 1580,42" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="810,86 1580,86" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="810,130 1580,130" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="810,174 1580,174" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="810,218 1580,218" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="810,262 1580,262" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="810,306 1580,306" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="810,350 1580,350" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="810,394 1580,394" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="810,438 1580,438" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="810,482 1580,482" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="810,526 1580,526" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="810,570 1580,570" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="810,614 1580,614" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="810,658 1580,658" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="810,702 1580,702" fill="none" stroke="#14233b" stroke-width="1" stroke-linejoin="round"/>
+<text x="70" y="86" font-family="Segoe UI,Arial,sans-serif" font-size="21" font-weight="700" fill="#5ee0ce">LENNARD SCHIMMER · EMBEDDED ROBOTICS</text>
+<text x="65" y="267" font-family="Segoe UI,Arial,sans-serif" font-size="108" font-weight="700" fill="#ffffff">SEEKER</text>
+<text x="70" y="386" font-family="Segoe UI,Arial,sans-serif" font-size="108" font-weight="700" fill="#ffffff">BOT</text>
+<text x="75" y="464" font-family="Segoe UI,Arial,sans-serif" font-size="34" font-weight="700" fill="#ffffff">Ein Raum. Ein Roboter.</text>
+<text x="75" y="510" font-family="Segoe UI,Arial,sans-serif" font-size="32" font-weight="400" fill="#c6d4eb">Ein ESP32, der selbst navigiert.</text>
+<rect x="75" y="570" width="165" height="45" rx="9" fill="#172b46" stroke="none"/>
+<text x="91" y="597" font-family="Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" fill="#9dede1">LIDAR + IMU</text>
+<rect x="255" y="570" width="147" height="45" rx="9" fill="#172b46" stroke="none"/>
+<text x="271" y="597" font-family="Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" fill="#9dede1">SLAM IN C</text>
+<rect x="417" y="570" width="190" height="45" rx="9" fill="#172b46" stroke="none"/>
+<text x="433" y="597" font-family="Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" fill="#9dede1">WEB CONTROL</text>
+<text x="75" y="704" font-family="Segoe UI,Arial,sans-serif" font-size="20" font-weight="400" fill="#8fa4c2">Projektbuch · Firmware 0.3.3 · Oktober 2026</text>
+<polyline points="880,170 1480,170 1480,620 1070,620 1070,540 880,540 880,170" fill="none" stroke="#6f86aa" stroke-width="8" stroke-linejoin="round"/>
+<rect x="1290" y="190" width="150" height="90" rx="9" fill="#20334d" stroke="none"/>
+<rect x="900" y="350" width="100" height="165" rx="9" fill="#20334d" stroke="none"/>
+<circle cx="1180" cy="395" r="88" fill="none" stroke="#22545d" stroke-width="2"/>
+<circle cx="1180" cy="395" r="155" fill="none" stroke="#22545d" stroke-width="2"/>
+<circle cx="1180" cy="395" r="220" fill="none" stroke="#22545d" stroke-width="2"/>
+<polyline points="1180,395 1002.4647922241901,292.5" fill="none" stroke="#23636b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1180,395 1077.5,217.46479222419006" fill="none" stroke="#23636b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1180,395 1215.5978764217207,193.11441063249737" fill="none" stroke="#23636b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1180,395 1337.0391108393906,263.22854001425947" fill="none" stroke="#23636b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1180,395 1385.0,395.0" fill="none" stroke="#23636b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1180,395 1347.9261690792432,512.5831694519644" fill="none" stroke="#23636b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1180,395 1233.0579042460167,593.014794389259" fill="none" stroke="#23636b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1180,395 1109.885870618238,587.6369872611112" fill="none" stroke="#23636b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1180,395 1002.4647922241901,497.5" fill="none" stroke="#23636b" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1110,575 1190,560 1240,500 1180,430 1180,300 1110,230" fill="none" stroke="#f5bd54" stroke-width="5" stroke-linejoin="round"/>
+<circle cx="1110" cy="230" r="12" fill="#f5bd54" stroke="none" stroke-width="2"/>
+<circle cx="1110" cy="230" r="24" fill="none" stroke="#f5bd54" stroke-width="2"/>
+<rect x="1133" y="352" width="19" height="95" rx="6" fill="#627898" stroke="none"/>
+<rect x="1210" y="352" width="19" height="95" rx="6" fill="#627898" stroke="none"/>
+<rect x="1155" y="345" width="52" height="103" rx="12" fill="#d2deef" stroke="none"/>
+<circle cx="1181" cy="376" r="17" fill="#5ee0ce" stroke="none" stroke-width="2"/>
+<circle cx="1181" cy="376" r="7" fill="#0b1528" stroke="none" stroke-width="2"/>
+<polyline points="1181,348 1181,318" fill="none" stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/>
+<polyline points="1181,318 1187.2325320018547,329.4085733045749" fill="none" stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/>
+<polyline points="1181,318 1174.7674679981453,329.4085733045748" fill="none" stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/>
+<text x="895" y="692" font-family="Segoe UI,Arial,sans-serif" font-size="17" font-weight="400" fill="#8fa4c2">Technische Illustration · keine Messaufnahme</text>
+</svg>

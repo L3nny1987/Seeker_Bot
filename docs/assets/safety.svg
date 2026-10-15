@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="790" viewBox="0 0 1600 790">
+<rect width="1600" height="790" fill="#f6f8fc"/>
+<text x="65" y="56" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="700" fill="#3461f6">SCHUTZKONZEPT</text>
+<text x="65" y="116" font-family="Segoe UI,Arial,sans-serif" font-size="40" font-weight="700" fill="#14243c">Bewegung hat mehrere Voraussetzungen</text>
+<text x="65" y="160" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="400" fill="#53627b">Ein Motorbefehl entsteht erst, wenn Bedienzustand, Verbindung, Sensorik und Navigationsplan zusammenpassen.</text>
+<rect x="65" y="230" width="275" height="165" rx="18" fill="#ffffff" stroke="#dce4f0"/>
+<rect x="65" y="230" width="7" height="165" rx="3" fill="#138a81" stroke="none"/>
+<text x="89" y="267" font-family="Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" fill="#138a81">01 · PRÜFUNG</text>
+<text x="89" y="311" font-family="Segoe UI,Arial,sans-serif" font-size="28" font-weight="700" fill="#14243c">Bedienung</text>
+<text x="89" y="355" font-family="Segoe UI,Arial,sans-serif" font-size="21" font-weight="400" fill="#53627b">Lease + Sequenz</text>
+<polyline points="340,312 361,312" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="361,312 349.5914266954251,318.2325320018546" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="361,312 349.5914266954251,305.7674679981454" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<rect x="364" y="230" width="275" height="165" rx="18" fill="#ffffff" stroke="#dce4f0"/>
+<rect x="364" y="230" width="7" height="165" rx="3" fill="#138a81" stroke="none"/>
+<text x="388" y="267" font-family="Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" fill="#138a81">02 · PRÜFUNG</text>
+<text x="388" y="311" font-family="Segoe UI,Arial,sans-serif" font-size="28" font-weight="700" fill="#14243c">Verbindung</text>
+<text x="388" y="355" font-family="Segoe UI,Arial,sans-serif" font-size="21" font-weight="400" fill="#53627b">Heartbeat + WLAN</text>
+<polyline points="639,312 660,312" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="660,312 648.5914266954252,318.2325320018546" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="660,312 648.5914266954252,305.7674679981454" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<rect x="663" y="230" width="275" height="165" rx="18" fill="#ffffff" stroke="#dce4f0"/>
+<rect x="663" y="230" width="7" height="165" rx="3" fill="#138a81" stroke="none"/>
+<text x="687" y="267" font-family="Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" fill="#138a81">03 · PRÜFUNG</text>
+<text x="687" y="311" font-family="Segoe UI,Arial,sans-serif" font-size="28" font-weight="700" fill="#14243c">Wahrnehmung</text>
+<text x="687" y="355" font-family="Segoe UI,Arial,sans-serif" font-size="21" font-weight="400" fill="#53627b">Frischer LiDAR</text>
+<polyline points="938,312 959,312" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="959,312 947.5914266954252,318.2325320018546" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="959,312 947.5914266954252,305.7674679981454" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<rect x="962" y="230" width="275" height="165" rx="18" fill="#ffffff" stroke="#dce4f0"/>
+<rect x="962" y="230" width="7" height="165" rx="3" fill="#3461f6" stroke="none"/>
+<text x="986" y="267" font-family="Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" fill="#3461f6">04 · PRÜFUNG</text>
+<text x="986" y="311" font-family="Segoe UI,Arial,sans-serif" font-size="28" font-weight="700" fill="#14243c">Lokalisierung</text>
+<text x="986" y="355" font-family="Segoe UI,Arial,sans-serif" font-size="21" font-weight="400" fill="#53627b">Pose + Qualität</text>
+<polyline points="1237,312 1258,312" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1258,312 1246.591426695425,318.2325320018546" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1258,312 1246.591426695425,305.7674679981454" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<rect x="1261" y="230" width="275" height="165" rx="18" fill="#ffffff" stroke="#dce4f0"/>
+<rect x="1261" y="230" width="7" height="165" rx="3" fill="#3461f6" stroke="none"/>
+<text x="1285" y="267" font-family="Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" fill="#3461f6">05 · PRÜFUNG</text>
+<text x="1285" y="311" font-family="Segoe UI,Arial,sans-serif" font-size="28" font-weight="700" fill="#14243c">Geometrie</text>
+<text x="1285" y="355" font-family="Segoe UI,Arial,sans-serif" font-size="21" font-weight="400" fill="#53627b">Korridor + Drehraum</text>
+<polyline points="1400,395 1400,445 798,445" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="798,445 798,485" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="798,485 791.7674679981453,473.5914266954252" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="798,485 804.2325320018547,473.5914266954251" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<rect x="460" y="485" width="675" height="112" rx="18" fill="#14243c" stroke="none"/>
+<text x="495" y="535" font-family="Segoe UI,Arial,sans-serif" font-size="29" font-weight="700" fill="#ffffff">Robot Manager · 20-ms-Regeltakt</text>
+<text x="495" y="574" font-family="Segoe UI,Arial,sans-serif" font-size="24" font-weight="400" fill="#c6d4eb">Fahrt / Drehung oder begründeter Stillstand</text>
+<text x="65" y="678" font-family="Segoe UI,Arial,sans-serif" font-size="26" font-weight="700" fill="#14243c">IDLE → MANUAL / AUTO     ·     ESTOP und FAULT sperren die normale Fahrt.</text>
+<polyline points="65,730 1535,730" fill="none" stroke="#d9e0ec" stroke-width="1" stroke-linejoin="round"/>
+<text x="65" y="763" font-family="Segoe UI,Arial,sans-serif" font-size="17" font-weight="400" fill="#62718a">Software-Schutzmaßnahmen ersetzen keine physische Abschaltung. Manuelle Inbetriebnahme ist auch ohne LiDAR möglich.</text>
+</svg>

@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="820" viewBox="0 0 1600 820">
+<rect width="1600" height="820" fill="#f6f8fc"/>
+<text x="65" y="56" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="700" fill="#3461f6">LOKALISIERUNG</text>
+<text x="65" y="116" font-family="Segoe UI,Arial,sans-serif" font-size="40" font-weight="700" fill="#14243c">Warum Karte und Gyroskop zusammenarbeiten</text>
+<text x="65" y="160" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="400" fill="#53627b">LiDAR erkennt die Raumstruktur. Das Gyroskop liefert schnelle Änderungen der Blickrichtung.</text>
+<rect x="85" y="225" width="430" height="360" rx="18" fill="#ffffff" stroke="#dce4f0"/>
+<rect x="560" y="225" width="430" height="360" rx="18" fill="#ffffff" stroke="#dce4f0"/>
+<rect x="1035" y="225" width="430" height="360" rx="18" fill="#ffffff" stroke="#dce4f0"/>
+<text x="110" y="270" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" fill="#14243c">1 · Während der Messung</text>
+<polyline points="298,515 150.55263202798145,411.7562414568117" fill="none" stroke="#c0d0e7" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="298,515 179.90937478170872,379.152275559901" fill="none" stroke="#c0d0e7" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="298,515 216.28171004688159,354.6188256460938" fill="none" stroke="#c0d0e7" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="298,515 257.5088102181043,339.6133883386576" fill="none" stroke="#c0d0e7" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="298,515 301.14143315871104,335.0274148718496" fill="none" stroke="#c0d0e7" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="298,515 344.5874281184537,341.13335126796767" fill="none" stroke="#c0d0e7" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="298,515 385.2657316443407,357.56845271490874" fill="none" stroke="#c0d0e7" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="298,515 420.7597048112497,383.3563337085493" fill="none" stroke="#c0d0e7" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="150,355 430,355" fill="none" stroke="#14243c" stroke-width="7" stroke-linejoin="round"/>
+<circle cx="298" cy="515" r="18" fill="#3461f6" stroke="none" stroke-width="2"/>
+<polyline points="275,493 321,482" fill="none" stroke="#138a81" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="321,482 311.3537824142569,490.7149576182848" fill="none" stroke="#138a81" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="321,482 308.4547424259,478.5916994851559" fill="none" stroke="#138a81" stroke-width="3" stroke-linejoin="round"/>
+<text x="110" y="625" font-family="Segoe UI,Arial,sans-serif" font-size="22" font-weight="400" fill="#53627b">Ein Umlauf braucht Zeit.</text>
+<text x="110" y="661" font-family="Segoe UI,Arial,sans-serif" font-size="22" font-weight="400" fill="#53627b">Der Roboter bewegt sich dabei.</text>
+<text x="585" y="270" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" fill="#14243c">2 · Bewegung berücksichtigen</text>
+<polyline points="630,355 910,355" fill="none" stroke="#14243c" stroke-width="7" stroke-linejoin="round"/>
+<polyline points="773,515 658.0933335321533,355" fill="none" stroke="#138a81" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="773,515 684.832212156129,355" fill="none" stroke="#138a81" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="773,515 716.8090109876132,355" fill="none" stroke="#138a81" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="773,515 752.1240348559902,355" fill="none" stroke="#138a81" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="773,515 788.679269490148,355" fill="none" stroke="#138a81" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="773,515 824.3030214988503,355" fill="none" stroke="#138a81" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="773,515 856.878935520612,355" fill="none" stroke="#138a81" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="773,515 884.4717238216091,355" fill="none" stroke="#138a81" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="773" cy="515" r="18" fill="#138a81" stroke="none" stroke-width="2"/>
+<text x="603" y="452" font-family="Segoe UI,Arial,sans-serif" font-size="22" font-weight="700" fill="#138a81">Δθ aus der IMU</text>
+<text x="585" y="625" font-family="Segoe UI,Arial,sans-serif" font-size="22" font-weight="400" fill="#53627b">Deskew bezieht Messpunkte</text>
+<text x="585" y="661" font-family="Segoe UI,Arial,sans-serif" font-size="22" font-weight="400" fill="#53627b">auf einen gemeinsamen Zeitpunkt.</text>
+<text x="1060" y="270" font-family="Segoe UI,Arial,sans-serif" font-size="25" font-weight="700" fill="#14243c">3 · Mit der Karte abgleichen</text>
+<polyline points="1105,510 1105,355 1380,355 1380,510" fill="none" stroke="#14243c" stroke-width="7" stroke-linejoin="round"/>
+<circle cx="1130" cy="357" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1155" cy="357" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1180" cy="357" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1205" cy="357" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1230" cy="357" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1255" cy="357" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1280" cy="357" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1305" cy="357" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1330" cy="357" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1355" cy="357" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1106" cy="380" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1380" cy="380" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1106" cy="405" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1380" cy="405" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1106" cy="430" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1380" cy="430" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1106" cy="455" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1380" cy="455" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1106" cy="480" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1380" cy="480" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1106" cy="505" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1380" cy="505" r="5" fill="#3461f6" stroke="none" stroke-width="2"/>
+<circle cx="1244" cy="495" r="18" fill="#3461f6" stroke="none" stroke-width="2"/>
+<polyline points="1244,477 1244,440" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1244,440 1250.2325320018547,451.4085733045749" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1244,440 1237.7674679981453,451.4085733045748" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<text x="1060" y="625" font-family="Segoe UI,Arial,sans-serif" font-size="22" font-weight="400" fill="#53627b">Position und Winkel korrigieren.</text>
+<text x="1060" y="661" font-family="Segoe UI,Arial,sans-serif" font-size="22" font-weight="400" fill="#53627b">Nur plausible Ergebnisse übernehmen.</text>
+<polyline points="515,420 550,420" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="550,420 538.5914266954252,426.2325320018546" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="550,420 538.5914266954252,413.7674679981454" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="990,420 1025,420" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1025,420 1013.5914266954252,426.2325320018546" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1025,420 1013.5914266954252,413.7674679981454" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="65,760 1535,760" fill="none" stroke="#d9e0ec" stroke-width="1" stroke-linejoin="round"/>
+<text x="65" y="793" font-family="Segoe UI,Arial,sans-serif" font-size="17" font-weight="400" fill="#62718a">Prinzipdarstellung: Deskew nutzt ein vereinfachtes Bewegungsmodell; schnelle oder mehrdeutige Szenen bleiben schwierig.</text>
+</svg>

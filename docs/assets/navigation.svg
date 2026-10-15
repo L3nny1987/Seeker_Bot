@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="820" viewBox="0 0 1600 820">
+<rect width="1600" height="820" fill="#f6f8fc"/>
+<text x="65" y="56" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="700" fill="#3461f6">NAVIGATION</text>
+<text x="65" y="116" font-family="Segoe UI,Arial,sans-serif" font-size="40" font-weight="700" fill="#14243c">Ein Ziel wird in prüfbare Schritte zerlegt</text>
+<text x="65" y="160" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="400" fill="#53627b">Die Karte gibt eine Richtung vor. Der aktuelle LiDAR-Scan begrenzt die tatsächlich erlaubte Bewegung.</text>
+<rect x="65" y="215" width="610" height="460" rx="18" fill="#ffffff" stroke="#dce4f0"/>
+<polyline points="90,235 90,650" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="130,235 130,650" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="170,235 170,650" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="210,235 210,650" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="250,235 250,650" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="290,235 290,650" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="330,235 330,650" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="370,235 370,650" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="410,235 410,650" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="450,235 450,650" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="490,235 490,650" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="530,235 530,650" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="570,235 570,650" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="610,235 610,650" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="650,235 650,650" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="90,235 650,235" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="90,275 650,275" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="90,315 650,315" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="90,355 650,355" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="90,395 650,395" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="90,435 650,435" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="90,475 650,475" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="90,515 650,515" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="90,555 650,555" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="90,595 650,595" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="90,635 650,635" fill="none" stroke="#edf1f7" stroke-width="1" stroke-linejoin="round"/>
+<polyline points="110,280 620,280 620,620 110,620 110,280" fill="none" stroke="#14243c" stroke-width="6" stroke-linejoin="round"/>
+<rect x="330" y="280" width="85" height="215" rx="3" fill="#c7d1e0" stroke="none"/>
+<polyline points="230,535 270,535 290,555 450,555 520,480 520,380" fill="none" stroke="#3461f6" stroke-width="5" stroke-linejoin="round"/>
+<circle cx="230" cy="535" r="16" fill="#138a81" stroke="none" stroke-width="2"/>
+<circle cx="520" cy="380" r="15" fill="#b0720d" stroke="none" stroke-width="2"/>
+<circle cx="520" cy="380" r="27" fill="none" stroke="#b0720d" stroke-width="2"/>
+<polyline points="246,535 290,555" fill="none" stroke="#138a81" stroke-width="4" stroke-linejoin="round"/>
+<polyline points="290,555 277.0349772150215,555.9529869804924" fill="none" stroke="#138a81" stroke-width="4" stroke-linejoin="round"/>
+<polyline points="290,555 282.1930574006591,544.6052105720897" fill="none" stroke="#138a81" stroke-width="4" stroke-linejoin="round"/>
+<text x="95" y="253" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#62718a">20-cm-Planungsraster · schematisch</text>
+<rect x="745" y="215" width="790" height="115" rx="18" fill="#ffffff" stroke="#dce4f0"/>
+<rect x="745" y="215" width="7" height="115" rx="3" fill="#3461f6" stroke="none"/>
+<text x="769" y="252" font-family="Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" fill="#3461f6">01 · ROUTE</text>
+<text x="769" y="296" font-family="Segoe UI,Arial,sans-serif" font-size="28" font-weight="700" fill="#14243c">BFS auf der Belegungskarte</text>
+<rect x="745" y="350" width="790" height="115" rx="18" fill="#ffffff" stroke="#dce4f0"/>
+<rect x="745" y="350" width="7" height="115" rx="3" fill="#138a81" stroke="none"/>
+<text x="769" y="387" font-family="Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" fill="#138a81">02 · FREIRAUM</text>
+<text x="769" y="431" font-family="Segoe UI,Arial,sans-serif" font-size="28" font-weight="700" fill="#14243c">19 Fahrkorridore + Drehkörper prüfen</text>
+<rect x="745" y="485" width="790" height="115" rx="18" fill="#ffffff" stroke="#dce4f0"/>
+<rect x="745" y="485" width="7" height="115" rx="3" fill="#b0720d" stroke="none"/>
+<text x="769" y="522" font-family="Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" fill="#b0720d">03 · FEEDBACK</text>
+<text x="769" y="566" font-family="Segoe UI,Arial,sans-serif" font-size="28" font-weight="700" fill="#14243c">Korrigieren, abwarten, neu messen</text>
+<polyline points="1140,330 1140,348" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1140,348 1133.7674679981453,336.5914266954252" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1140,348 1146.2325320018547,336.5914266954251" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1140,465 1140,483" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1140,483 1133.7674679981453,471.5914266954252" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1140,483 1146.2325320018547,471.5914266954251" fill="none" stroke="#3461f6" stroke-width="3" stroke-linejoin="round"/>
+<text x="745" y="664" font-family="Segoe UI,Arial,sans-serif" font-size="23" font-weight="700" fill="#14243c">Bei schwacher Lokalisierung pausiert die Kartennavigation.</text>
+<polyline points="65,760 1535,760" fill="none" stroke="#d9e0ec" stroke-width="1" stroke-linejoin="round"/>
+<text x="65" y="793" font-family="Segoe UI,Arial,sans-serif" font-size="17" font-weight="400" fill="#62718a">Der Planer verwendet eine Breitensuche; ein vollständiges, aufgeweitetes Kostenfeld und globale Schleifenoptimierung fehlen.</text>
+</svg>
