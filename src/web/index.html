@@ -114,6 +114,8 @@ footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-si
 .route-editor{margin-top:20px;border-top:1px solid var(--border);padding-top:18px}
 .route-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:12px 0}
 .route-fields .field{margin:0}.route-fields input[type=number],.route-fields input[type=text]{width:100%}
+.route-steps{margin:8px 0 0;padding-left:20px;line-height:1.5}
+#route-ready{margin:8px 0 0;color:var(--text-2)}
 .route-checks{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;margin:12px 0}
 .route-checks label{display:flex;align-items:center;gap:7px}
 .route-buttons{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
@@ -194,7 +196,7 @@ footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-si
 <p class="small muted" id="goal-info">Kein Ziel gesetzt. Die Karte entsteht aus jedem LIDAR-Scan (Scan-Matching + MPU6050-Kreisel) und bleibt bis zum Neustart im Speicher.</p>
 <div class="route-editor" aria-label="Geschlossene Routen">
 <div class="row"><h3>Routen · geschlossener Rundkurs</h3><span class="pill" id="route-state" role="status">KEINE ROUTE</span></div>
-<p class="small muted">Punkte auf der Karte antippen oder mit Maus/Finger einen Rundkurs zeichnen. Die Linie folgt der Zeichenreihenfolge und wird zum Start geschlossen.</p>
+<ol class="small muted route-steps"><li>Im Tab „Fahren“ die Steuerung übernehmen; der Roboter steht im Leerlauf.</li><li>„Neue Route zeichnen“, dann Punkte in die Karte tippen oder eine Linie ziehen.</li><li>„Kreis schließen“ – oder die Linie am grünen Start enden lassen.</li><li>Ein rot markierter Abschnitt liegt im Unbekannten oder zu nah an einem Hindernis: dort neu zeichnen.</li><li>Runden wählen und „Route starten“. Der Roboter fährt zuerst zum Start.</li></ol>
 <div class="route-fields">
 <div class="field"><label for="route-select">Gemerkte Route für diese Karte</label><select id="route-select"><option value="">Neue Route</option></select></div>
 <div class="field"><label for="route-name">Name</label><input id="route-name" type="text" maxlength="32" value="Meine Runde"></div>
@@ -203,6 +205,7 @@ footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-si
 <div class="route-checks"><label><input id="route-infinite" type="checkbox">∞ Bis zum Stopp wiederholen</label><label><input id="route-adaptive" type="checkbox" checked>Tempo mit Streckenerfahrung steigern</label></div>
 <div class="route-buttons"><button id="route-draw">Neue Route zeichnen</button><button id="route-undo" disabled>Letzten Punkt entfernen</button><button id="route-close" disabled>Kreis schließen</button><button id="route-clear" disabled>Verwerfen</button><button id="route-save" disabled>Route merken</button><button id="route-delete" disabled>Gemerkte Route löschen</button></div>
 <div class="route-buttons"><button id="route-start" class="primary" disabled>Route starten</button><button id="route-stop" class="danger" disabled>Route stoppen</button></div>
+<p class="small" id="route-ready" role="status"></p>
 <div class="route-progress"><span class="pill" id="route-rounds">Runden: —</span><span class="pill" id="route-experience">Streckenerfahrung: —</span><span class="pill" id="route-power">Fahrtleistung: —</span></div>
 <p class="small muted" id="route-info" role="status">Eine Runde zählt erst nach Rückkehr zum Startpunkt. Routen gehören zu dieser Karte; nach Neustart oder Kartenreset neu zeichnen. Der Browser muss für die Steuerverbindung aktiv bleiben.</p>
 </div>
@@ -485,7 +488,7 @@ const strategyNames={explore:'Erkunden',wall_left:'Wand links',wall_right:'Wand 
 const MAP_COLORS=[[11,20,32],[30,58,77],[110,128,146],[231,238,248]];
 let mapData=null,mapImage=null,mapView=null,goal=null,mapBusy=false,mapRetryMs=3000;
 let routeDraft=[],routeClosed=false,routeEditing=false,routeDrawView=null,routePointer=null,routeSuppressClick=0;
-let routeFrame=0,routeLibrary=[],routeLive=null,routeSyncKey='',routeFetchBusy=false,routeUploading=false;
+let routeFrame=0,routeLibrary=[],routeLive=null,routeSyncKey='',routeFetchBusy=false,routeUploading=false,routeProblem=null,routeWasActive=false;
 function routeDistance(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
 function routeLineDistance(p,a,b){const dx=b.x-a.x,dy=b.y-a.y,n=dx*dx+dy*dy;const t=n?Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/n)):0;return Math.hypot(p.x-a.x-t*dx,p.y-a.y-t*dy);}
 function simplifyRoute(points,tolerance=60){
@@ -514,21 +517,26 @@ function prepareRoute(raw){
  if(route.length>64)throw new Error('Route zu umfangreich: höchstens 64 Wegpunkte. Den Verlauf vereinfachen.');
  return route;
 }
-function routeKnownFree(points,m,radius){
- if(!m||!points.length)return false;const cells=Math.ceil(radius/m.res);
+function routeIssue(points,m,radius){
+ if(!m||points.length<3)return {edge:-1,code:'route_unexplored'};
+ const cells=Math.ceil(radius/m.res),cls=i=>(m.cells[i>>2]>>((i&3)*2))&3;
  for(let i=0;i<points.length;i++){
   const a=points[i],b=points[(i+1)%points.length],steps=Math.ceil(routeDistance(a,b)/(m.res*.5));
   for(let j=0;j<=steps;j++){
    const gx=Math.floor((a.x+(b.x-a.x)*j/steps)/m.res)+m.n/2,gy=Math.floor((a.y+(b.y-a.y)*j/steps)/m.res)+m.n/2;
+   if(gx<0||gy<0||gx>=m.n||gy>=m.n)return {edge:i,code:'route_unexplored'};
+   const centre=cls(gy*m.n+gx);
+   if(centre>=2)return {edge:i,code:'route_obstacle'};
+   if(centre===0)return {edge:i,code:'route_unexplored'};
    for(let dy=-cells;dy<=cells;dy++)for(let dx=-cells;dx<=cells;dx++){
-    if(dx*dx+dy*dy>cells*cells)continue;const x=gx+dx,y=gy+dy,index=y*m.n+x;
-    if(x<0||y<0||x>=m.n||y>=m.n||((m.cells[index>>2]>>((index&3)*2))&3)!==1)return false;
+    if(dx*dx+dy*dy>cells*cells)continue;const x=gx+dx,y=gy+dy;
+    if(x>=0&&y>=0&&x<m.n&&y<m.n&&cls(y*m.n+x)>=2)return {edge:i,code:'route_obstacle'};
    }
   }
  }
- return true;
+ return null;
 }
-function routeRadius(){const s=typeof state==='undefined'?null:state;return Math.max(Math.ceil(Math.hypot(Math.max(s?.bodyFrontMm||100,s?.bodyRearMm||200),s?.bodyHalfWidthMm||70))+50,(s?.settings?.robotWidthMm||200)/2);}
+function routeRadius(){const s=typeof state==='undefined'?null:state;if(s?.routeCorridorMm)return s.routeCorridorMm;return Math.max((s?.bodyHalfWidthMm||70)+50,(s?.settings?.robotWidthMm||200)/2);}
 function routePacket(points,laps,adaptive,generation,owner,serial){
  if(points.length<3||points.length>64||!Number.isInteger(laps)||laps<0||laps>4294967295||!generation||!owner||!serial)throw new Error('Ungültige Routenparameter.');
  const data=new ArrayBuffer(32+points.length*4),v=new DataView(data);
@@ -546,10 +554,27 @@ function routeControls(){
  $('route-save').disabled=!can||!routeClosed;$('route-delete').disabled=!can||$('route-select').value==='';
  $('route-select').disabled=!can;$('route-name').disabled=!can;$('route-infinite').disabled=!can;$('route-adaptive').disabled=!can;
  $('route-laps').disabled=!can||$('route-infinite').checked;
- $('route-start').disabled=!can||!routeClosed||!token||!state?.commissioned||!state?.poseValid||state?.slamWeak||state?.slamLost||!state?.lidarHealthy;
+ routeProblem=routeClosed&&mapData?routeIssue(routeDraft,mapData,routeRadius()):null;
+ const blockers=routeBlockers();
+ $('route-start').disabled=!can||blockers.length>0;
+ $('route-ready').textContent=active?'':blockers.length?'Zum Start fehlt: '+blockers.join(' · '):'Bereit: „Route starten“ drücken.';
  $('route-stop').disabled=!active||!token||!online;
  $('map').classList?.toggle('route-drawing',routeEditing);
 }
+function routeBlockers(){
+ const s=typeof state==='undefined'?null:state,list=[];
+ if(!online||!s)return ['Verbindung zum Roboter'];
+ if(s.mode!=='idle')list.push('Roboter stoppen (Leerlauf)');
+ if(!token)list.push('Steuerung übernehmen (Tab Fahren)');
+ if(!s.commissioned)list.push('Inbetriebnahme bestätigen');
+ if(!s.lidarHealthy)list.push('vollständige LIDAR-Daten');
+ if(!s.poseValid||s.slamWeak||s.slamLost)list.push('sichere Lokalisierung – Roboter kurz ruhig stehen lassen');
+ if(!mapData)list.push('Karte laden (Tab Karte geöffnet lassen)');
+ if(!routeClosed)list.push('Rundkurs zeichnen und schließen');
+ else if(routeProblem)list.push('rot markierten Abschnitt neu zeichnen');
+ return list;
+}
+function routeIssueText(issue){return 'Rot markierter Abschnitt: '+(routeErrors[issue.code]||issue.code);}
 function clearRouteDraft(){routeDraft=[];routeClosed=false;routeEditing=false;routeDrawView=null;routePointer=null;routeControls();}
 function routeMenu(){
  const select=$('route-select');select.textContent='';const blank=document.createElement('option');blank.value='';blank.textContent='Neue Route';select.append(blank);
@@ -563,10 +588,9 @@ function restoreRoutes(){
 }
 function closeRoute(){
  try{
-  const prepared=prepareRoute(routeDraft);
-  if(!routeKnownFree(prepared,mapData,routeRadius()))throw new Error('Route braucht durchgehend bekannte freie Fläche mit Platz für den Roboter. Mehr Abstand zu Wänden und unbekannten Bereichen halten.');
+  const prepared=prepareRoute(routeDraft),issue=routeIssue(prepared,mapData,routeRadius());
   routeDraft=prepared;routeClosed=true;routeEditing=false;routeDrawView=null;routePointer=null;
-  routeMessage('Rundkurs geschlossen · '+prepared.length+' Wegpunkte. Runde wählen und Route starten.');
+  routeMessage(issue?routeIssueText(issue)+' „Neue Route zeichnen“ und diese Stelle anders führen.':'Rundkurs geschlossen · '+prepared.length+' Wegpunkte. Runden wählen und Route starten.');
  }catch(e){routeMessage(e.message);}
  routeControls();drawMap();
 }
@@ -602,18 +626,19 @@ $('route-select').onchange=()=>{
  routeMessage('„'+item.name+'“ geladen. Freiraum wird beim Start erneut geprüft.');routeControls();drawMap();
 };
 $('route-delete').onclick=()=>{if(!routeCanEdit()||$('route-select').value==='')return;routeLibrary.splice(Number($('route-select').value),1);persistRoutes();routeMenu();clearRouteDraft();drawMap();};
-const routeErrors={route_invalid_packet:'Ungültiger Rundkurs oder unpassende Punktabstände.',route_busy:'Erst stoppen: Routen starten nur im Leerlauf.',route_wrong_map:'Die Karte wurde gewechselt. Route neu zeichnen.',route_not_ready:'Lokalisierung, LIDAR und Inbetriebnahme müssen bereit sein.',route_power_range:'Die Auto-Fahrtleistung muss mindestens der Mindest-PWM des Fahrmotors entsprechen.',route_unknown_or_blocked:'Route berührt unbekannten oder belegten Raum. Mehr Abstand einplanen.',route_controller_or_state:'Steuerung oder Startzustand nicht mehr gültig.',ota_busy:'Ein Firmware-Update läuft.'};
+Object.assign(reasonText,{route_ready:'Route angenommen',route_approach:'Route: fährt zum Startpunkt',route_follow:'Route: folgt der Kante',route_waypoint:'Route: Wegpunkt erreicht',route_localization_wait:'Route pausiert: wartet auf sichere Lokalisierung',route_complete:'Route abgeschlossen: alle Runden gefahren',route_deviation:'Route abgebrochen: mehr als 60 cm neben der Kante',route_no_progress:'Route abgebrochen: 45 s kein Fortschritt zum nächsten Wegpunkt',route_map_changed:'Route abgebrochen: Karte wurde zurückgesetzt',route_unreachable:'Route abgebrochen: Navigation findet keinen Weg weiter',route_start_unreachable:'Route abgebrochen: kein Kartenweg zum Startpunkt'});
+const routeErrors={route_invalid_packet:'Ungültiger Rundkurs oder unpassende Punktabstände.',route_busy:'Erst stoppen: Routen starten nur im Leerlauf.',route_wrong_map:'Die Karte wurde gewechselt. Route neu zeichnen.',route_not_ready:'Lokalisierung, LIDAR und Inbetriebnahme müssen bereit sein.',route_unexplored:'führt durch noch nicht kartierten Bereich. Dort zuerst kartieren oder die Route durch bekannte freie Fläche legen.',route_obstacle:'liegt zu nah an einem kartierten Hindernis. Mit etwas mehr Abstand zeichnen.',route_controller_or_state:'Steuerung oder Startzustand nicht mehr gültig.',ota_busy:'Ein Firmware-Update läuft.'};
 async function startRoute(){
  if($('route-start').disabled)return;
  const laps=$('route-infinite').checked?0:Number($('route-laps').value);
  if(!Number.isInteger(laps)||laps<0||laps>4294967295||(!laps&&!$('route-infinite').checked)){routeMessage('Eine ganze Rundenzahl ab 1 eingeben oder ∞ aktivieren.');return;}
- if(!routeKnownFree(routeDraft,mapData,routeRadius())){routeMessage(routeErrors.route_unknown_or_blocked);return;}
+ const issue=routeIssue(routeDraft,mapData,routeRadius());if(issue){routeMessage(routeIssueText(issue));return;}
  if(!confirm('Rundkurs '+(laps?laps+' Mal':'bis zum Stopp (∞)')+' abfahren? Die Steuerverbindung im Browser muss aktiv bleiben.'))return;
  zero();routeUploading=true;routeControls();const owner=token,frame=routeFrame,points=routeDraft.map(p=>({...p})),adaptive=$('route-adaptive').checked;
  const result=queue.then(async()=>{
   if(!owner||owner!==token||frame!==routeFrame)throw new Error('Steuerung oder Karte wurde gewechselt.');
   const packet=routePacket(points,laps,adaptive,frame,owner,++sequence),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),3000);
-  try{const response=await fetch('/api/route',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Seeker-Control':'1'},body:packet,cache:'no-store',signal:controller.signal});const reply=await response.json();if(!response.ok||!reply.ok)throw new Error(routeErrors[reply.error]||reply.error||'Route wurde abgewiesen.');return reply;}finally{clearTimeout(timer);}
+  try{const response=await fetch('/api/route',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Seeker-Control':'1'},body:packet,cache:'no-store',signal:controller.signal});const reply=await response.json();if(!response.ok||!reply.ok)throw new Error(['route_unexplored','route_obstacle'].includes(reply.error)?'Roboter meldet: Ein Abschnitt '+routeErrors[reply.error]:routeErrors[reply.error]||reply.error||'Route wurde abgewiesen.');return reply;}finally{clearTimeout(timer);}
  });queue=result.catch(()=>{});
  try{await result;routeMessage('Route gestartet. Zuerst zum Startpunkt, danach die vollständigen Runden.');routeSyncKey='';}catch(e){routeMessage(e.message);log('Route: '+e.message);}finally{routeUploading=false;routeControls();}
 }
@@ -622,11 +647,15 @@ let routeFetchAfter=0;
 function routeTelemetry(s){
  const generation=Number(s.mapGeneration)||0;
  if(generation&&generation!==routeFrame){const changed=!!routeFrame;routeFrame=generation;clearRouteDraft();routeLive=null;routeSyncKey='';restoreRoutes();if(changed){mapData=null;mapImage=null;goal=null;routeMessage('Neue Kartensitzung: alte Routen und Streckenerfahrung verworfen.');}}
- $('route-state').textContent=s.routeActive?(s.routeApproaching?'ZUM STARTPUNKT':'ROUTE AKTIV'):s.reason==='route_complete'?'ROUTE ABGESCHLOSSEN':routeEditing?'ZEICHNEN':routeClosed?'ROUTE BEREIT':'KEINE ROUTE';
+ const aborted=/^route_(deviation|no_progress|map_changed|unreachable|start_unreachable)$/.test(s.reason);
+ $('route-state').textContent=s.routeActive?(s.routeApproaching?'ZUM STARTPUNKT':'ROUTE AKTIV'):s.reason==='route_complete'?'ROUTE ABGESCHLOSSEN':aborted?'ROUTE ABGEBROCHEN':routeEditing?'ZEICHNEN':routeClosed?'ROUTE BEREIT':'KEINE ROUTE';
+ if(routeWasActive&&!s.routeActive){const text=reasonText[s.reason]||'Route beendet ('+s.reason+')';routeMessage(text+'.');log(text);}
+ routeWasActive=!!s.routeActive;
  $('route-rounds').textContent='Runden: '+(s.routeConfigured?(s.routeCompleted||0)+' / '+(s.routeLaps||'∞'):'—');
  $('route-experience').textContent='Streckenerfahrung: '+(s.routeConfigured?(s.routeConfidence||0)+'/100':'—');
  $('route-power').textContent='Fahrtleistung: '+(s.routeActive?(s.routePower||0)+' % PWM':'—');
- if(s.routeActive)routeMessage(s.routeApproaching?'Der Roboter fährt zunächst zum Startpunkt.':'Wegpunkt '+((s.routeTarget||0)+1)+' / '+s.routePoints+' · '+(s.routeAdaptive?'Tempo nach Streckenerfahrung, innerhalb deiner Auto-Leistung.':'Feste Auto-Leistung.')+' Der Rundenzähler ersetzt hier das normale Auto-Zeitlimit.');
+ if(s.routeActive&&s.reason==='route_localization_wait')routeMessage('Pausiert: wartet auf sichere Lokalisierung, dann geht es automatisch weiter.');
+ else if(s.routeActive)routeMessage(s.routeApproaching?'Der Roboter fährt zunächst zum Startpunkt.':'Wegpunkt '+((s.routeTarget||0)+1)+' / '+s.routePoints+' · '+(s.routeAdaptive?'Tempo nach Streckenerfahrung, innerhalb deiner Auto-Leistung.':'Feste Auto-Leistung.')+' Der Rundenzähler ersetzt hier das normale Auto-Zeitlimit.');
  if(routeLive){routeLive.active=!!s.routeActive;routeLive.target=s.routeTarget||0;}
  const key=generation+':'+(s.routeRevision||0);
  if(generation&&key!==routeSyncKey&&!routeFetchBusy&&Date.now()>=routeFetchAfter&&!document.hidden&&!$('tab-karte').hidden){
@@ -640,7 +669,7 @@ function renderRoute(ctx,P){
  const points=active?routeLive.points.map(([x,y])=>({x,y})):routeDraft;
  if(!points.length)return;const closed=active||routeClosed;
  ctx.lineWidth=3;ctx.lineJoin='round';ctx.setLineDash(closed?[]:[6,4]);
- for(let i=1;i<points.length+(closed?1:0);i++){const index=i%points.length,a=P(points[i-1].x,points[i-1].y),b=P(points[index].x,points[index].y),score=active?(routeLive.scores?.[index]||0):0;ctx.strokeStyle=active?(score>=60?'#56dfc0':'#68a6ff'):'#f9c36c';ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();}
+ for(let i=1;i<points.length+(closed?1:0);i++){const index=i%points.length,a=P(points[i-1].x,points[i-1].y),b=P(points[index].x,points[index].y),score=active?(routeLive.scores?.[index]||0):0,bad=!active&&closed&&routeProblem?.edge===i-1;ctx.lineWidth=bad?5:3;ctx.strokeStyle=bad?'#ff5d5d':active?(score>=60?'#56dfc0':'#68a6ff'):'#f9c36c';ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();}
  ctx.setLineDash([]);points.forEach((p,i)=>{const xy=P(p.x,p.y);ctx.fillStyle=active&&i===routeLive.target?'#ffffff':i?'#f9c36c':'#56dfc0';ctx.beginPath();ctx.arc(xy[0],xy[1],i?3:6,0,Math.PI*2);ctx.fill();});
  const start=P(points[0].x,points[0].y);ctx.font='bold 12px system-ui';ctx.fillStyle='#56dfc0';ctx.fillText('START',start[0]+9,start[1]-9);
 }
