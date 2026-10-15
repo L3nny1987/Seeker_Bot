@@ -235,11 +235,12 @@ static esp_err_t status_handler(httpd_req_t *req)
         s.view.wall_right.valid ? (unsigned)s.view.wall_right.distance_mm : 0u, s.view.wall_right.angle_deg);
     put(&w, "\"mapGeneration\":%lu,\"routeRevision\":%lu,\"routeActive\":%s,\"routeConfigured\":%s,"
         "\"routeApproaching\":%s,\"routeAdaptive\":%s,\"routeLaps\":%lu,\"routeCompleted\":%lu,"
-        "\"routeLearnedLaps\":%lu,\"routePoints\":%u,\"routeTarget\":%u,\"routeConfidence\":%u,\"routePower\":%d,",
+        "\"routeLearnedLaps\":%lu,\"routePoints\":%u,\"routeTarget\":%u,\"routeConfidence\":%u,\"routePower\":%d,"
+        "\"routeCorridorMm\":%u,",
         (unsigned long)s.map.generation, (unsigned long)s.route_revision, json_bool(s.route_active),
         json_bool(s.route_configured), json_bool(s.route_approaching), json_bool(s.route_adaptive),
         (unsigned long)s.route_laps, (unsigned long)s.route_completed, (unsigned long)s.route_learned_laps,
-        s.route_points, s.route_target, s.route_confidence, s.route_power);
+        s.route_points, s.route_target, s.route_confidence, s.route_power, s.route_corridor_mm);
     put(&w, "\"poseValid\":%s,\"slamLost\":%s,\"poseX\":%.0f,\"poseY\":%.0f,\"poseDeg\":%.1f,"
         "\"slamQuality\":%.2f,\"slamScans\":%lu,\"slamIntegrated\":%lu,\"slamRejected\":%lu,"
         "\"slamUpdateMs\":%lu,\"mapAreaM2\":%.1f,\"pathPoints\":%u,",

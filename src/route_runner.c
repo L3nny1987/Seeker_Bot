@@ -1,4 +1,5 @@
 #include "route_runner.h"
+#include "slam.h"
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
@@ -53,11 +54,11 @@ bool route_packet_decode(const uint8_t *data, unsigned size, route_definition_t 
     return route_definition_error(d) == NULL;
 }
 
-bool route_grid_clear(const route_definition_t *d, const int8_t *grid,
-                      unsigned size, unsigned res, unsigned radius)
+const char *route_grid_error(const route_definition_t *d, const int8_t *grid,
+                             unsigned size, unsigned res, unsigned radius)
 {
     if (route_definition_error(d) || !grid || !res || size < 2 || size > 512 || radius > 1000)
-        return false;
+        return "route_invalid_points";
     int cells = (int)((radius + res - 1) / res);
     for (unsigned i = 0; i < d->count; i++) {
         route_point_t a = d->points[i], b = d->points[(i + 1) % d->count];
@@ -66,16 +67,22 @@ bool route_grid_clear(const route_definition_t *d, const int8_t *grid,
             float t = (float)step / steps;
             int gx = (int)floorf((a.x + (b.x - a.x) * t) / res) + (int)size / 2;
             int gy = (int)floorf((a.y + (b.y - a.y) * t) / res) + (int)size / 2;
+            if (gx < 0 || gy < 0 || gx >= (int)size || gy >= (int)size) return "route_unexplored";
+            /* The centre line runs through space the robot has seen free. */
+            uint8_t centre = slam_cell_class(grid[gy * size + gx]);
+            if (centre >= 2) return "route_obstacle";
+            if (centre == 0) return "route_unexplored";
+            /* Beside it only mapped obstacles count; the reactive layer handles the rest. */
             for (int dy = -cells; dy <= cells; dy++)
                 for (int dx = -cells; dx <= cells; dx++) {
                     if (dx * dx + dy * dy > cells * cells) continue;
                     int x = gx + dx, y = gy + dy;
-                    if (x < 0 || y < 0 || x >= (int)size || y >= (int)size ||
-                        grid[y * size + x] > -10) return false; /* known free only */
+                    if (x >= 0 && y >= 0 && x < (int)size && y < (int)size &&
+                        slam_cell_class(grid[y * size + x]) >= 2) return "route_obstacle";
                 }
         }
     }
-    return true;
+    return NULL;
 }
 
 void route_runner_clear(route_runner_t *s) { memset(s, 0, sizeof(*s)); }
@@ -123,6 +130,47 @@ static float deviation(route_point_t a, route_point_t b, float x, float y)
     return hypotf(x - a.x - t * dx, y - a.y - t * dy);
 }
 
+/* Beyond the line through b perpendicular to a->b: the waypoint was passed. */
+static bool passed(route_point_t a, route_point_t b, float x, float y)
+{
+    float dx = b.x - a.x, dy = b.y - a.y;
+    return (x - b.x) * dx + (y - b.y) * dy >= 0;
+}
+
+static route_result_t reach(route_runner_t *s, const char **reason)
+{
+    if (s->approaching) s->approaching = false;
+    else {
+        if (s->segment_clean && s->score[s->target] < 100) {
+            unsigned score = s->score[s->target] + 20;
+            s->score[s->target] = score > 100 ? 100 : (uint8_t)score;
+        }
+        if (!s->target) {
+            if (s->completed < UINT32_MAX) s->completed++;
+            if (s->lap_clean && s->learned_laps < UINT32_MAX) s->learned_laps++;
+            if (s->definition.laps && s->completed >= s->definition.laps) {
+                *reason = "route_complete";
+                route_runner_stop(s, false);
+                return ROUTE_DONE;
+            }
+            s->lap_clean = true;
+        }
+    }
+    s->target = (s->target + 1) % s->definition.count;
+    s->segment_clean = true;
+    s->best_distance = INFINITY;
+    s->stalled_ms = 0;
+    *reason = "route_waypoint";
+    return ROUTE_NEXT;
+}
+
+route_result_t route_runner_approach_done(route_runner_t *s, const char **reason)
+{
+    *reason = "route_wait";
+    if (!s->active || !s->approaching) return ROUTE_WAIT;
+    return reach(s, reason);
+}
+
 route_result_t route_runner_step(route_runner_t *s, route_sample_t v, const char **reason)
 {
     *reason = "route_wait";
@@ -156,14 +204,12 @@ route_result_t route_runner_step(route_runner_t *s, route_sample_t v, const char
     }
     if (s->healthy_scans < 3) return ROUTE_WAIT;
     route_point_t goal = s->definition.points[s->target];
+    route_point_t from = s->definition.points[(s->target + s->definition.count - 1) % s->definition.count];
     float remaining = hypotf(v.x - goal.x, v.y - goal.y);
-    if (!s->approaching) {
-        unsigned previous = (s->target + s->definition.count - 1) % s->definition.count;
-        if (deviation(s->definition.points[previous], goal, v.x, v.y) > ROUTE_MAX_DEVIATION_MM) {
-            *reason = "route_deviation";
-            route_runner_stop(s, true);
-            return ROUTE_FAILED;
-        }
+    if (!s->approaching && deviation(from, goal, v.x, v.y) > ROUTE_MAX_DEVIATION_MM) {
+        *reason = "route_deviation";
+        route_runner_stop(s, true);
+        return ROUTE_FAILED;
     }
     if (remaining + 50 < s->best_distance) {
         s->best_distance = remaining;
@@ -174,33 +220,14 @@ route_result_t route_runner_step(route_runner_t *s, route_sample_t v, const char
         route_runner_stop(s, true);
         return ROUTE_FAILED;
     }
-    if (remaining > (s->approaching ? ROUTE_APPROACH_MM : ROUTE_CAPTURE_MM)) {
+    /* A small capture circle alone makes a coarse drive orbit the waypoint. */
+    bool arrived = s->approaching ? remaining <= ROUTE_APPROACH_MM
+                                  : remaining <= ROUTE_CAPTURE_MM || passed(from, goal, v.x, v.y);
+    if (!arrived) {
         *reason = s->approaching ? "route_approach" : "route_follow";
         return ROUTE_RUN;
     }
-    if (s->approaching) s->approaching = false;
-    else {
-        if (s->segment_clean && s->score[s->target] < 100) {
-            unsigned score = s->score[s->target] + 20;
-            s->score[s->target] = score > 100 ? 100 : (uint8_t)score;
-        }
-        if (!s->target) {
-            if (s->completed < UINT32_MAX) s->completed++;
-            if (s->lap_clean && s->learned_laps < UINT32_MAX) s->learned_laps++;
-            if (s->definition.laps && s->completed >= s->definition.laps) {
-                *reason = "route_complete";
-                route_runner_stop(s, false);
-                return ROUTE_DONE;
-            }
-            s->lap_clean = true;
-        }
-    }
-    s->target = (s->target + 1) % s->definition.count;
-    s->segment_clean = true;
-    s->best_distance = INFINITY;
-    s->stalled_ms = 0;
-    *reason = "route_waypoint";
-    return ROUTE_NEXT;
+    return reach(s, reason);
 }
 
 unsigned route_runner_confidence(const route_runner_t *s)
@@ -214,7 +241,8 @@ unsigned route_runner_confidence(const route_runner_t *s)
 int route_runner_power(const route_runner_t *s, motion_settings_t cfg,
                        float quality, unsigned clearance, bool uncertain)
 {
-    int maximum = cfg.auto_drive_percent;
+    /* The output stage lifts any drive command to the motor minimum; report that effective value. */
+    int maximum = cfg.auto_drive_percent > cfg.drive_min_percent ? cfg.auto_drive_percent : cfg.drive_min_percent;
     int base = cfg.auto_slow_percent > cfg.drive_min_percent ? cfg.auto_slow_percent : cfg.drive_min_percent;
     if (base > maximum) base = maximum;
     if (!s->definition.adaptive) return maximum;

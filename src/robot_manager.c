@@ -74,6 +74,15 @@ const char *robot_mode_name(robot_mode_t mode)
     return mode <= ROBOT_FAULT ? names[mode] : "fault";
 }
 
+/* Map pre-check corridor around a route edge. The swept turning circle is not
+   required along the whole edge: rotations are guarded live by the swing check. */
+static unsigned route_corridor_mm(motion_settings_t settings)
+{
+    unsigned radius = SEEKER_BODY_HALF_WIDTH_MM + ROUTE_CORRIDOR_MARGIN_MM;
+    if ((unsigned)settings.robot_width_mm / 2 > radius) radius = settings.robot_width_mm / 2;
+    return radius;
+}
+
 void robot_manager_route_snapshot(route_runner_t *out)
 {
     if (!out) return;
@@ -95,14 +104,9 @@ esp_err_t robot_manager_start_route(uint32_t token, uint32_t sequence,
     *reason = "route_not_ready";
     if (!before.commissioned || !before.lidar_healthy || !before.map.valid || before.map.weak ||
         !pose_feedback_fresh(before.map.feedback, esp_timer_get_time())) return ESP_ERR_INVALID_STATE;
-    *reason = "route_power_range";
-    if (before.settings.auto_drive_percent < before.settings.drive_min_percent) return ESP_ERR_INVALID_STATE;
-    unsigned extent = SEEKER_BODY_FRONT_MM > SEEKER_BODY_REAR_MM ? SEEKER_BODY_FRONT_MM : SEEKER_BODY_REAR_MM;
-    unsigned radius = (unsigned)ceilf(hypotf((float)extent, SEEKER_BODY_HALF_WIDTH_MM)) + 50;
-    if ((unsigned)before.settings.robot_width_mm / 2 > radius) radius = before.settings.robot_width_mm / 2;
-    *reason = "route_unknown_or_blocked";
-    if (!route_grid_clear(definition, mapper_grid(), SLAM_SIZE, SLAM_RES_MM, radius))
-        return ESP_ERR_INVALID_STATE;
+    /* No power gate: the output stage lifts every drive command to drive_min_percent anyway. */
+    *reason = route_grid_error(definition, mapper_grid(), SLAM_SIZE, SLAM_RES_MM, route_corridor_mm(before.settings));
+    if (*reason) return ESP_ERR_INVALID_STATE;
     /* Geometry is checked without the manager lock, while explicitly idle.
        Re-check authorization and pose afterwards; all buffers are fixed-size. */
     mapper_info_t map = mapper_info();
@@ -346,8 +350,17 @@ static void manager_task(void *arg)
                 if (ready) {
                     navigation_plan_t p = navigation_auto_step(&s_navigation, &auto_view,
                         settings, now / 1000, scan.sequence);
-                    if (p.done) stop_locked(ROBOT_IDLE, s_route.active ? "route_unreachable" : p.reason);
-                    else {
+                    const char *arrival;
+                    if (p.done && s_route.active && s_route.approaching && !strcmp(p.reason, "goal_reached") &&
+                        route_runner_approach_done(&s_route, &arrival) == ROUTE_NEXT) {
+                        /* The planner may shift a start point near a wall; its arrival counts. */
+                        route_point_t point = s_route.definition.points[s_route.target];
+                        navigation_auto_configure(&s_navigation, NAV_STRATEGY_ROUTE, point.x, point.y);
+                        s_status.reason = arrival;
+                    } else if (p.done) {
+                        stop_locked(ROBOT_IDLE, !s_route.active ? p.reason :
+                                    s_route.approaching ? "route_start_unreachable" : "route_unreachable");
+                    } else {
                         drive = p.drive; turn = p.turn; tight = p.tight; precision = p.precision;
                         s_status.reason = p.reason;
                         if (s_route.active && (!strncmp(p.reason, "escape", 6) ||
@@ -558,6 +571,7 @@ robot_status_t robot_manager_status(void)
     status.route_confidence = route_runner_confidence(&s_route);
     status.route_power = s_route_power;
     status.route_revision = s_route_revision;
+    status.route_corridor_mm = route_corridor_mm(status.settings);
     xSemaphoreGive(s_lock);
     return status;
 }

@@ -5,10 +5,11 @@
 
 /* Fixed-size, allocation-free closed patrol routes in the current map frame. */
 #define ROUTE_MAX_POINTS 64
-#define ROUTE_CAPTURE_MM 120.0f
-#define ROUTE_APPROACH_MM 250.0f
-#define ROUTE_MAX_DEVIATION_MM 400.0f
+#define ROUTE_CAPTURE_MM 200.0f         /* or the waypoint was passed along its edge */
+#define ROUTE_APPROACH_MM 300.0f        /* above NAV_GOAL_RADIUS_MM: the runner sees arrival first */
+#define ROUTE_MAX_DEVIATION_MM 600.0f   /* room for obstacle avoidance beside the edge */
 #define ROUTE_PROGRESS_TIMEOUT_MS 45000
+#define ROUTE_CORRIDOR_MARGIN_MM 50     /* beyond the body half width */
 #define ROUTE_PACKET_HEADER 32
 #define ROUTE_PACKET_MAX (ROUTE_PACKET_HEADER + ROUTE_MAX_POINTS * 4)
 
@@ -41,13 +42,17 @@ const char *route_definition_error(const route_definition_t *definition);
 /* Compact upload avoids a large cJSON tree. All multibyte fields little-endian. */
 bool route_packet_decode(const uint8_t *data, unsigned size, route_definition_t *definition,
                          uint32_t *token, uint32_t *sequence);
-bool route_grid_clear(const route_definition_t *definition, const int8_t *grid,
-                      unsigned size, unsigned resolution_mm, unsigned radius_mm);
+/* NULL when every edge runs through known free cells and no mapped obstacle lies
+   within radius_mm of it; otherwise "route_unexplored" or "route_obstacle". */
+const char *route_grid_error(const route_definition_t *definition, const int8_t *grid,
+                             unsigned size, unsigned resolution_mm, unsigned radius_mm);
 void route_runner_clear(route_runner_t *runner);
 void route_runner_start(route_runner_t *runner, const route_definition_t *definition, uint64_t now_ms);
 void route_runner_stop(route_runner_t *runner, bool penalize);
 void route_runner_trouble(route_runner_t *runner);
 route_result_t route_runner_step(route_runner_t *runner, route_sample_t sample, const char **reason);
+/* The map-path approach reached its (possibly shifted) goal: start the first edge. */
+route_result_t route_runner_approach_done(route_runner_t *runner, const char **reason);
 unsigned route_runner_confidence(const route_runner_t *runner);
 int route_runner_power(const route_runner_t *runner, motion_settings_t settings,
                        float quality, unsigned clearance_mm, bool uncertain);

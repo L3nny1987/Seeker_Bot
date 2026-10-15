@@ -29,6 +29,7 @@ typedef struct {
     bool route_active, route_configured, route_approaching, route_adaptive;
     uint32_t route_laps, route_completed, route_learned_laps;
     unsigned route_points, route_target, route_confidence;
+    unsigned route_corridor_mm;        /* map pre-check radius around each edge */
     int route_power;
     uint32_t route_revision;
 } robot_status_t;

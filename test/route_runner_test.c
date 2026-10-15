@@ -90,6 +90,21 @@ int main(void)
     assert(at(&s, (route_point_t){-2000,-2000}, 1) == ROUTE_FAILED);
     assert(!s.active);
 
+    /* A waypoint counts once it is passed along its edge, even outside the capture
+       circle; before that the robot keeps following the edge. */
+    approach(&s, &d);
+    route_point_t beside_before = {1207, 240}, beside_after = {1146, 547};
+    assert(at(&s, beside_before, 1) == ROUTE_RUN && s.target == 1);
+    assert(at(&s, beside_after, 1) == ROUTE_NEXT && s.target == 2);
+    route_runner_stop(&s, false);
+
+    /* The map path may end on a shifted start point: its arrival starts the first edge. */
+    route_runner_start(&s, &d, now);
+    for (int i = 0; i < 3; i++) assert(at(&s, (route_point_t){0, 0}, 1) == (i < 2 ? ROUTE_WAIT : ROUTE_RUN));
+    assert(route_runner_approach_done(&s, &reason) == ROUTE_NEXT && !s.approaching && s.target == 1);
+    assert(route_runner_approach_done(&s, &reason) == ROUTE_WAIT && s.target == 1);
+    route_runner_stop(&s, false);
+
     approach(&s, &d);
     assert(at(&s, d.points[0], 1) == ROUTE_RUN);
     route_result_t result = ROUTE_RUN;
@@ -108,11 +123,23 @@ int main(void)
     assert(route_runner_power(&s,cfg,1,2000,true)==85);
     assert(route_runner_power(&s,cfg,1,500,false)==85);
     s.definition.adaptive=false; assert(route_runner_power(&s,cfg,1,2000,true)==95);
+    /* Auto power below the motor minimum is valid: report what the output stage drives. */
+    motion_settings_t low = {.auto_drive_percent=80,.auto_slow_percent=80,.drive_min_percent=85,.auto_slow_mm=300};
+    assert(route_runner_power(&s,low,1,2000,false)==85);
+    s.definition.adaptive=true; assert(route_runner_power(&s,low,1,2000,false)==85);
 
     static int8_t grid[256*256]; memset(grid,-20,sizeof(grid));
-    assert(route_grid_clear(&d,grid,256,50,260));
-    grid[128*256+148]=30; assert(!route_grid_clear(&d,grid,256,50,260));
-    grid[128*256+148]=0; assert(!route_grid_clear(&d,grid,256,50,260));
+    assert(!route_grid_error(&d,grid,256,50,120));
+    /* (148,128) lies on the centre line at the route point (1000,0). */
+    grid[128*256+148]=30; assert(!strcmp(route_grid_error(&d,grid,256,50,120),"route_obstacle"));
+    grid[128*256+148]=12; assert(!strcmp(route_grid_error(&d,grid,256,50,120),"route_obstacle"));
+    grid[128*256+148]=0; assert(!strcmp(route_grid_error(&d,grid,256,50,120),"route_unexplored"));
+    grid[128*256+148]=-20;
+    /* Beside the centre line: unknown space is acceptable, a mapped obstacle is not. */
+    grid[128*256+151]=0; assert(!route_grid_error(&d,grid,256,50,120));
+    grid[128*256+151]=30; assert(!strcmp(route_grid_error(&d,grid,256,50,120),"route_obstacle"));
+    grid[128*256+151]=-20; grid[128*256+152]=30; assert(!route_grid_error(&d,grid,256,50,120));
+    grid[128*256+152]=-20;
     d.points[1]=d.points[0]; assert(route_definition_error(&d));
     d=circle(1); d.points[0].x=6300; assert(route_definition_error(&d));
 
@@ -127,6 +154,6 @@ int main(void)
     packet[24]=1;assert(!route_packet_decode(packet,sizeof(packet),&d,&token,&serial));packet[24]=0;
     packet[5]=2;assert(!route_packet_decode(packet,sizeof(packet),&d,&token,&serial));packet[5]=1;
     assert(!route_packet_decode(packet,sizeof(packet)-1,&d,&token,&serial));
-    puts("Route runner: ordered closure, finite/infinite laps, fresh poses, map binding, confidence, power gates, grid and packet checks passed.");
+    puts("Route runner: ordered closure, pass-through waypoints, approach hand-off, finite/infinite laps, fresh poses, map binding, confidence, power, corridor and packet checks passed.");
     return 0;
 }
