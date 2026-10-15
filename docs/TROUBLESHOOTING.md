@@ -41,6 +41,12 @@ Controller-Lease, Inbetriebnahmefreigabe, Betriebszustand und LiDAR-Gesundheit p
 
 Ein gemeldeter WLAN-Abbruch löscht den Lease und setzt IDLE. Nach der Rückkehr Steuerung übernehmen und den Modus erneut bewusst starten. Im ESTOP-/FAULT-Zustand zunächst die Ursache beheben und die Verriegelung bewusst zurücksetzen.
 
+## Route startet nicht oder bricht ab
+
+`route_unknown_or_blocked` bedeutet, dass entlang einer Kante unbekannte oder belegte Zellen im Körperkorridor liegen. Den Bereich zuerst im Stillstand und mit langsamen Fahrten kartieren oder die Route mit mehr Wandabstand zeichnen. `route_wrong_map` folgt auf einen Kartenreset: Gemerkte Routen gehören zur alten Karte und müssen neu gezeichnet werden. `route_not_ready` weist auf fehlende Inbetriebnahme, LiDAR-Probleme oder eine schwache Lokalisierung hin.
+
+Während der Fahrt beendet `route_deviation` die Route bei mehr als 40 cm Abstand zur Kante, `route_no_progress` nach 45 s ohne Annäherung. `route_localization_wait` ist eine bewusste Pause, bis wieder drei verwertbare Scans vorliegen. Alle Codes stehen in der [API-Beschreibung](API.md#patrouillenrouten).
+
 ## OTA oder Aufnahme funktioniert nicht
 
 Beim ersten Aufbau die korrekte Partitionstabelle per USB installieren. OTA nur mit passendem Anwendungsimage und ruhendem Roboter durchführen. Recorder und OTA benötigen denselben inaktiven Slot; eine Funktion überschreibt die Daten der anderen. Ein leerer Recorder kann nicht heruntergeladen werden. Schreibzugriffe benötigen passende Origin-Header.

@@ -1,33 +1,41 @@
 # Verifikationsstand vom 15.10.2026
 
-Diese Prüfung gehört zur Dokumentations- und Veröffentlichungsvorbereitung für Seeker Bot 0.3.3. Sie wurde lokal unter Windows durchgeführt; sie ist kein GitHub-CI-Lauf und keine Fahrabnahme.
+Diese Prüfung gehört zur Veröffentlichungsvorbereitung für Seeker Bot 0.4.0. Sie wurde lokal unter Windows durchgeführt; sie ist kein GitHub-CI-Lauf und keine Fahrabnahme.
 
 ## Frischer Quelltextexport
 
-Der geprüfte Quelltext wurde mit dem Exportwerkzeug in ein neues Verzeichnis entpackt. Es enthielt keine vorhandenen `.pio`-Buildreste, keine verwalteten Komponenten und keine echten WLAN-Zugangsdaten. Für den Firmwarebau wurde ausschließlich die Zugangsdatenvorlage kopiert.
+Der geprüfte Quelltext wurde mit dem Exportwerkzeug in ein neues Verzeichnis entpackt. Es enthielt keine vorhandenen `.pio`-Buildreste, keine verwalteten Komponenten und keine echten WLAN-Zugangsdaten. Für den Firmwarebau wurde ausschließlich die Zugangsdatenvorlage kopiert; cJSON wurde dabei neu aus der Komponentenregistry bezogen.
 
 | Prüfung | Ergebnis |
 |---|---|
-| 8 C-Testprogramme | Erfolgreich |
-| 6 JavaScript-Testprogramme | Erfolgreich |
+| 10 C-Testprogramme | Erfolgreich |
+| 7 JavaScript-Testprogramme | Erfolgreich |
 | Dashboard-Asset ohne vorherigen Firmwarebau | Selbstständig erzeugt und geprüft |
 | Firmware `seeker_bot` mit PlatformIO Core 6.2.0 | Vollständiger Neubau erfolgreich |
-| Statische RAM-Belegung laut Build | 167128 / 327680 Byte |
-| Flash-Anwendung laut Build | 989603 / 1966080 Byte |
-| Anwendungsimage | 990032 Byte; nicht im öffentlichen Export |
+| Statische RAM-Belegung laut Build | 167584 / 327680 Byte |
+| Flash-Anwendung laut Build | 1002643 / 1966080 Byte |
+| Anwendungsimage | 1003072 Byte; nicht im öffentlichen Export |
 | Compiler-Warnungen und -Fehler im frischen Build-Log | Keine Treffer |
-| Veröffentlichungscheck | Erfolgreich |
+| Veröffentlichungscheck | Erfolgreich, 116 Dateien |
+
+## Jeder Commit des Git-Verlaufs
+
+Jeder Commit ab Firmware 0.2.0 wurde einzeln ausgecheckt, mit Platzhalter-Zugangsdaten gebaut und mit den zu diesem Zeitpunkt vorhandenen Host-Tests geprüft. Änderte ein Commit `sdkconfig.defaults`, `platformio.ini` oder die Partitionstabelle, wurde die generierte Konfiguration verworfen und neu erzeugt.
+
+Alle 14 geprüften Stände bauen ohne Compiler-Warnung. Die Tests bestehen in 13 Ständen. Im Commit „Keep reset diagnostics and the log before a crash“ scheitert `telemetry_test.js`, weil der DOM-Stub des Tests `Element.after()` nicht kennt; der direkt folgende Commit behebt das. Ab dem Commit mit dem Veröffentlichungswerkzeug besteht in jedem Stand auch der Veröffentlichungscheck. Die beiden abschließenden Commits ändern nur Lizenz und Dokumentation.
 
 ## Dokumentation und Konfiguration
 
-Das Projektbuch wurde mit einem Markdown-Parser eingelesen. Alle 18 Kapitelziele des Inhaltsverzeichnisses, die Tabellenstruktur und die Codeblock-Begrenzungen wurden geprüft. Die fünf Abbildungen wurden visuell kontrolliert. Lokale Markdown-Dateiverweise wurden über den Veröffentlichungscheck validiert.
+Das Inhaltsverzeichnis des Projektbuchs verweist auf alle 18 Kapitel; die neuen Verweise auf `API.md#patrouillenrouten` sind gültig. Tabellenbreiten und Codeblock-Begrenzungen wurden für alle Markdown-Dateien geprüft. Lokale Markdown-Dateiverweise validiert der Veröffentlichungscheck.
 
-VS-Code-Konfiguration wurde als JSON beziehungsweise JSON mit Kommentaren geprüft, der CI-Workflow als YAML. PowerShell-Werkzeuge wurden syntaktisch geparst, ohne einen Upload oder eine Fahrt auszulösen. Der Git-Diff enthielt bei der abschließenden Whitespace-Prüfung keine Fehler.
+Alle fünf Abbildungen lassen sich mit dem ursprünglichen Generator byte-identisch reproduzieren. Das Titelbild wurde damit auf Firmware 0.4.0 aktualisiert und, wie die Architekturgrafik, visuell kontrolliert.
+
+Die VS-Code-Konfiguration wurde als JSON beziehungsweise JSON mit Kommentaren geprüft, der CI-Workflow als YAML. Die PowerShell-Werkzeuge wurden syntaktisch geparst, ohne einen Upload oder eine Fahrt auszulösen. `git diff --check` meldet nur den beabsichtigten Markdown-Zeilenumbruch im Projektbuch und die unveränderte Leerzeile am Ende des cJSON-Lizenztexts.
 
 ## Geheimnisse und Grenzen dieser Prüfung
 
-Die beiden aktuell lokal hinterlegten WLAN-Zeichenketten wurden weder in der vorgesehenen Veröffentlichungsmenge noch in den untersuchten erreichbaren Git-Blobs gefunden. Werte wurden dabei nicht ausgegeben. Persönliche absolute Rechnerpfade und die lokale Geräteadresse wurden aus den Veröffentlichungsdateien entfernt.
+Die beiden lokal hinterlegten WLAN-Zeichenketten wurden weder in der vorgesehenen Veröffentlichungsmenge noch in einem Commit des Git-Verlaufs gefunden. Werte wurden dabei nicht ausgegeben. Ältere Commits enthalten lokale Werkzeugpfade, einen festen COM-Port und eine private LAN-Adresse als Skript-Standardwert; der aktuelle Stand enthält sie nicht.
 
-Die Prüfung ist auf die genannten Inhalte begrenzt. Alte andere Geheimnisse, externer Veröffentlichungszustand, sämtliche Drittanbieter-Lizenzpflichten eines später verteilten Binaries und tatsächliches Fahrverhalten sind damit nicht vollständig geprüft. Der Quelltextexport enthält keine Git-Historie, lokale Zugangsdaten, Firmware oder Aufzeichnungen.
+Die Prüfung ist auf die genannten Inhalte begrenzt. Andere denkbare Geheimnisse, der externe Veröffentlichungszustand, sämtliche Drittanbieter-Lizenzpflichten eines später verteilten Binaries und tatsächliches Fahrverhalten sind damit nicht vollständig geprüft. Der Quelltextexport enthält keine Git-Historie, lokale Zugangsdaten, Firmware oder Aufzeichnungen.
 
-**Noch offen:** Projektlizenz, Veröffentlichungsziel, privater Meldekanal und dokumentierte Langzeitfahrt mit Firmware 0.3.3.
+**Noch offen:** Veröffentlichungsziel, private Schwachstellenmeldung auf GitHub und dokumentierte Fahrten mit Firmware 0.4.0 einschließlich Patrouillenrouten.

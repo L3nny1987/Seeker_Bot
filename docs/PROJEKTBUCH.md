@@ -5,7 +5,7 @@
 **Ein autonomer Kettenroboter, der seine Umgebung selbst vermisst, eine Karte aufbaut und daraus Bewegungen ableitet.**
 
 Projektbuch von **Lennard Schimmer**  
-Firmwarestand **0.3.3** · Dokumentationsstand **15. Oktober 2026**
+Firmwarestand **0.4.0** · Dokumentationsstand **15. Oktober 2026**
 
 > Seeker Bot verbindet Robotik, Echtzeitsoftware und eine lokale Weboberfläche auf einem ESP32. Sein Reiz liegt in der vollständigen Verarbeitungskette: Aus einzelnen Laserabständen entsteht eine räumliche Vorstellung, aus dieser Vorstellung ein Weg und aus dem Weg eine kontrollierte Bewegung.
 
@@ -278,6 +278,8 @@ Die reaktive Hindernisprüfung verwendet zusätzlich den aktuellen Scan. Dadurch
 
 Die API-Bezeichnungen lauten `explore`, `wall_left`, `wall_right`, `goal` und `path`. `home` beziehungsweise `path_home` setzen das Ziel auf den Kartenursprung. Damit ist eine Rückfahrt zum Start gemeint; eine automatische Ladestationserkennung oder ein Andockvorgang ist nicht implementiert.
 
+Zusätzlich kann der Roboter einen auf der Karte gezeichneten Rundkurs wiederholt abfahren. Dieser Betrieb wird nicht über die Strategieauswahl gestartet, sondern über eine eigene Prüfung; Abschnitt 8.6 beschreibt ihn.
+
 ### 8.2 Exploration verfolgt ein Ziel
 
 Die Erkundung sucht erreichbare Frontiers: freie Bereiche neben bisher unbekanntem Raum. Wenn keine geeignete Frontier vorhanden ist, können wenig besuchte erreichbare Zellen interessant werden.
@@ -305,6 +307,18 @@ Stopp- und Wiederanfahrgrenzen besitzen eine Hysterese. Ein Messwert knapp an de
 Das autonome Verhalten enthält Phasen für Bremsen, Rückwärtsfahrt, Drehen, erneutes Prüfen und Blockierung. Nach wiederholten erfolglosen Versuchen ist ein begrenztes Freifahrverhalten mit kurzen Impulsen vorgesehen.
 
 Dabei zählen beobachteter Freiraum und Zeitgrenzen. Die Existenz eines Ausweichmanövers bedeutet nicht, dass eine Bewegung in jeder engen Geometrie möglich ist. Manchmal ist der richtige nächste Zustand ein begründeter Stillstand.
+
+### 8.6 Geschlossene Patrouillenrouten
+
+Seit Firmware 0.4.0 lässt sich im Dashboard ein geschlossener Rundkurs mit 3 bis 64 Eckpunkten auf die Karte zeichnen. Der Roboter fährt zuerst den ersten Punkt an, folgt dann den Kanten der Reihe nach und kehrt am Ende jeder Runde zum Startpunkt zurück. Die Rundenzahl ist frei wählbar; alternativ läuft die Patrouille bis zu einem Stopp.
+
+Eine Route ist eine Absicht in Kartenkoordinaten. Deshalb gehört sie fest zu der Kartengeneration, auf der sie gezeichnet wurde. Nach einem Kartenreset passt sie nicht mehr und wird abgewiesen. Vor dem Start prüft die Firmware die Geometrie, den Betriebszustand und die Lokalisierung. Außerdem muss entlang jeder Kante ein Korridor für die Körperkontur samt Reserve vollständig aus bekannt freien Zellen bestehen. Unbekannte Zellen zählen dabei nicht als frei: Eine Route darf nicht durch Raum führen, den der Roboter noch nie gesehen hat.
+
+Während der Fahrt bleibt die lokale Korridorprüfung aus Abschnitt 8.4 aktiv. Die Route gibt die Richtung vor; ob der nächste Bewegungsabschnitt zulässig ist, entscheidet weiterhin die aktuelle Wahrnehmung. Ein Wegpunkt gilt im Abstand von 12 cm als erreicht. Mehr als 40 cm seitliche Abweichung von der Kante, 45 Sekunden ohne Annäherung oder ein Kartenreset beenden die Route. Unsichere Lokalisierung pausiert sie, bis wieder drei verwertbare Scans vorliegen. Eine beendete Route startet nicht von selbst neu.
+
+Optional passt die Firmware das Tempo an die Streckenerfahrung an. Jede Kante erhält eine Bewertung, die nach sauber befahrenen Abschnitten steigt und nach Problemen fällt. Erst nach mindestens zwei sauberen Runden darf eine gut bewertete, gerade Kante schneller als die Langsamstufe befahren werden. Richtungswechsel über 30°, geringer Freiraum, niedrige Match-Qualität und die Anfahrt bleiben konservativ. Die Bewertung ist eine Heuristik, keine Wahrscheinlichkeit.
+
+Die Übertragung an den ESP32 nutzt ein kompaktes Binärpaket statt eines JSON-Baums. Der Route Runner arbeitet mit festen Arrays und ohne Heap-Allokation. Gemerkte Routen speichert der Browser pro Karte; auf dem Roboter liegt nur die aktive Route.
 
 ## 9. Warum die Fahrt ruhiger werden soll
 
@@ -381,7 +395,7 @@ Für einen frei fahrenden Aufbau ist eine zugängliche physische Abschaltung der
 
 Das Dashboard verbindet manuelle Steuerung, Live-Radar, Kartenansicht, Bewegungsparameter und Systemdiagnose. Es ist responsiv gestaltet und besitzt eine helle sowie eine dunkle Darstellung.
 
-In der Karte lassen sich Position, Fahrspur und Zielbezug beobachten. Ein Kartenklick kann ein Ziel für die Pfadnavigation liefern. Das Radar zeigt die aktuelle Wahrnehmung und hilft beispielsweise, eine um 180° falsche Sensorausrichtung sofort zu erkennen.
+In der Karte lassen sich Position, Fahrspur und Zielbezug beobachten. Ein Kartenklick kann ein Ziel für die Pfadnavigation liefern. Im selben Tab werden Patrouillenrouten gezeichnet, gemerkt und gestartet. Das Radar zeigt die aktuelle Wahrnehmung und hilft beispielsweise, eine um 180° falsche Sensorausrichtung sofort zu erkennen.
 
 Die Oberfläche wird beim Firmwarebau deterministisch mit gzip komprimiert und als konstantes Asset eingebettet. Zur Laufzeit liegt keine zusätzliche unkomprimierte HTML-Kopie im Heap. Ein OTA-Update aktualisiert damit auch das Dashboard.
 
@@ -395,7 +409,7 @@ Das ist Teil der Verbindungsstabilität: Ein Browser soll die vorhandene Leistun
 
 ### 11.3 Schnittstellen für eigene Werkzeuge
 
-Status und Steuerung sind über HTTP erreichbar. Wichtige Endpunkte sind `/api/status`, `/api/telemetry`, `/api/map`, `/api/control`, `/api/diag`, `/api/record` und `/api/ota`.
+Status und Steuerung sind über HTTP erreichbar. Wichtige Endpunkte sind `/api/status`, `/api/telemetry`, `/api/map`, `/api/control`, `/api/route`, `/api/diag`, `/api/record` und `/api/ota`.
 
 Die Schreibzugriffe prüfen einen passenden `Origin` und den Header `X-Seeker-Control: 1`. Diese Prüfung schützt gegen bestimmte fremde Webseiten im Browser. Sie ersetzt keine Authentifizierung gegenüber einem selbst geschriebenen Client im lokalen Netzwerk.
 
@@ -577,20 +591,22 @@ Eine bestandene Regression zeigt, dass definierte Eingaben das erwartete Verhalt
 
 | Prüfung | Ergebnis im dokumentierten Stand | Aussage |
 |---|---|---|
-| 8 C-Testprogramme | Bestanden | Geometrie, Strategien, Feedback, Scan-Builder, SLAM und Kartentransport für die Testfälle |
-| 6 JavaScript-Testprogramme | Bestanden | Decoder, Dashboard-Syntax, Polling, Asset, Defaults und Motorrichtungs-Mock |
+| 10 C-Testprogramme | Bestanden | Geometrie, Strategien, Feedback, Scan-Builder, SLAM, Kartentransport und Routen für die Testfälle |
+| 7 JavaScript-Testprogramme | Bestanden | Decoder, Dashboard-Syntax, Polling, Asset, Defaults, Motorrichtungs-Mock und Routenoberfläche |
 | ESP32-Releasebau | Erfolgreich | Der geprüfte Quelltext lässt sich für das Ziel übersetzen |
 | Synthetischer Gang mit 938 Scans | Kein Lokalisierungsverlust; maximale Abweichung 34 mm und 0,2° | Verhalten in der modellierten idealisierten Szene |
 | Synthetische Kurskorrektur | Begrenzte Impulse; kein Überschwingen in diesem Modell | Wirkung der Feedbacklogik unter den Testannahmen |
 | Synthetische Kartenkompression | 16.384 → 698 Byte Rasterdaten | Einsparung für die konkrete Testkarte |
+| Synthetische Patrouille über vier Runden | Alle Runden abgeschlossen; radiale Abweichung 6 mm | Zusammenspiel von Route Runner, Rückmeldung und Ausgabestufe im Modell |
 | Diagnose des Geräts mit 0.3.2 | Watchdog-Resets und extrem geringe Heap-Minima beobachtet | Reale Hinweise auf das Verbindungsproblem des Vorgängerstands |
-| Langzeitfahrt mit 0.3.3 nach den Verbindungsänderungen | Noch separat nachzuweisen | Keine behauptete abgeschlossene Hardwareabnahme |
+| Langzeitfahrt nach den Verbindungsänderungen aus 0.3.3 | Noch separat nachzuweisen | Keine behauptete abgeschlossene Hardwareabnahme |
+| Patrouillenroute am realen Roboter | Noch separat nachzuweisen | Routen sind bisher nur synthetisch und per Codeprüfung geprüft |
 
 Die Testausgabe zeigt außerdem einen bewusst schwierigen Fall: Eine sehr schnelle Drehung kann ohne Gyroskop weiterhin große Winkelabweichungen verursachen. Mit Gyroskop gelingt die entsprechende synthetische Szene deutlich besser. Dieser Unterschied ist ein Hinweis auf den Nutzen der Sensorfusion und auf die Grenze des LiDAR-only-Betriebs.
 
 ### 16.2 Welche Fehlerklassen abgedeckt sind
 
-Am 15.10.2026 wurden die Host-Suite und der vollständige ESP32-Bau zusätzlich aus einem frischen Quelltextexport ausgeführt. Der Export enthielt keine vorhandenen Buildreste und wurde ausschließlich mit Platzhalter-Zugangsdaten gebaut. Alle 14 Testprogramme und der Neubau waren erfolgreich. Der genaue Prüfungsumfang steht in `docs/VALIDATION.md`.
+Am 15.10.2026 wurden die Host-Suite und der vollständige ESP32-Bau für Firmware 0.4.0 zusätzlich aus einem frischen Quelltextexport ausgeführt. Der Export enthielt keine vorhandenen Buildreste und wurde ausschließlich mit Platzhalter-Zugangsdaten gebaut. Alle 17 Testprogramme und der Neubau waren erfolgreich. Außerdem wurde jeder Commit des Git-Verlaufs einzeln gebaut und getestet. Der genaue Prüfungsumfang steht in `docs/VALIDATION.md`.
 
 Die Prüfungen behandeln unter anderem fehlende Messbereiche, Körperbreiten, Vorzeichen, Scan-Umläufe und Zeitstempelüberläufe. Navigationstests prüfen Blockierung, Ausweichen, Wandfolge, Bug2, Kartenpfade, Hysterese und Stillstand bei schwacher Lokalisierung.
 
@@ -639,7 +655,7 @@ Dies sind Entwicklungsmöglichkeiten, keine bereits eingebauten Funktionen. Ihre
 | Projektname | Seeker Bot |
 | Autor | Lennard Schimmer |
 | Repository-/Firmwarebezeichner | `Seeker_Bot` / `seeker_bot` |
-| Dokumentierter Firmwarestand | 0.3.3 |
+| Dokumentierter Firmwarestand | 0.4.0 |
 | Zielplattform | ESP32, `esp32dev`, 4 MB Flash |
 | Hauptsprache | C; HTML, CSS und JavaScript für das Dashboard |
 | Entwicklungsumgebung | PlatformIO mit ESP-IDF |
@@ -670,7 +686,7 @@ Dies sind Entwicklungsmöglichkeiten, keine bereits eingebauten Funktionen. Ihre
 
 ### 18.3 Grundlage dieser Dokumentation
 
-Die Funktionsbeschreibung beruht auf dem Quelltext des dokumentierten Stands, insbesondere `src/slam.c`, `src/navigation.c`, `src/robot_manager.c`, `src/mapper.c`, `src/imu.c`, `src/web_server.c`, den Hardwarekomponenten und den zugehörigen Tests. Pinbelegung und Standardwerte stammen aus dem zentralen Konfigurationsheader. Versionsauflösung und Partitionen stammen aus den Builddateien.
+Die Funktionsbeschreibung beruht auf dem Quelltext des dokumentierten Stands, insbesondere `src/slam.c`, `src/navigation.c`, `src/route_runner.c`, `src/robot_manager.c`, `src/mapper.c`, `src/imu.c`, `src/web_server.c`, den Hardwarekomponenten und den zugehörigen Tests. Pinbelegung und Standardwerte stammen aus dem zentralen Konfigurationsheader. Versionsauflösung und Partitionen stammen aus den Builddateien.
 
 Ergänzende Primärquellen:
 

@@ -4,7 +4,7 @@
 
 **Autonome Raumerkundung auf einem ESP32.** LiDAR und Gyroskop liefern die Umgebung, eine eigene SLAM-Implementierung baut die Karte, und der Roboter navigiert zu erreichbaren Zielen. Die Bedienung erfolgt im lokalen Browser.
 
-**Autor:** Lennard Schimmer · **Firmware:** 0.3.3 · **Status:** Entwicklungsprojekt mit Host-Regressionen; reale Langzeitabnahme des aktuellen Stands steht aus.
+**Autor:** Lennard Schimmer · **Firmware:** 0.4.0 · **Status:** Entwicklungsprojekt mit Host-Regressionen; reale Langzeitabnahme des aktuellen Stands steht aus.
 
 [Projektbuch lesen](docs/PROJEKTBUCH.md) · [Einrichten](docs/GETTING_STARTED.md) · [Verkabelung](docs/WIRING.md) · [API](docs/API.md) · [Fehlersuche](docs/TROUBLESHOOTING.md)
 
@@ -13,6 +13,7 @@
 - **Lokale Kartierung:** Scan Matching in C, 256 × 256 Zellen mit 5 cm Auflösung; keine Radencoder und kein externer Rechner für die Navigation.
 - **Sensorfusion:** MPU6050-Gyroskop, zeitbezogene Scanentzerrung und Qualitätsprüfung der Positionsschätzung.
 - **Mehrere Fahrstrategien:** Exploration, Wandfolge, Bug2-Zielnavigation und Kartenpfade per Breitensuche.
+- **Patrouillenrouten:** Geschlossene Rundkurse auf der Karte zeichnen und 1…n-mal oder bis zum Stopp abfahren; gestartet wird nur über bekannt freiem Korridor.
 - **Körpergerechte Freiraumprüfung:** 19 Fahrkorridore, Rückraum und überstrichener Drehkörper.
 - **Begrenzte Kurskorrektur:** Kurze Impulse und frische Rückmeldung gegen unnötiges Pendeln.
 - **Integriertes Dashboard:** Steuerung, Radar, Karte, Einstellungen, Diagnose und OTA; keine externen Laufzeitdateien.
@@ -62,7 +63,7 @@ python tools/check_publication.py
 pio run -e seeker_bot
 ```
 
-Die Host-Suite benötigt weder Roboter noch WLAN-Zugangsdaten. Sie umfasst 8 C- und 6 JavaScript-Testprogramme. Die mitgelieferte GitHub-Actions-Konfiguration führt die Prüfungen und einen Firmwarebau mit Platzhalter-Zugangsdaten aus. Ein GitHub-CI-Ergebnis wird erst nach Veröffentlichung verfügbar.
+Die Host-Suite benötigt weder Roboter noch WLAN-Zugangsdaten. Sie umfasst 10 C- und 7 JavaScript-Testprogramme. Die mitgelieferte GitHub-Actions-Konfiguration führt die Prüfungen und einen Firmwarebau mit Platzhalter-Zugangsdaten aus. Ein GitHub-CI-Ergebnis wird erst nach Veröffentlichung verfügbar.
 
 ## Aktueller Umfang
 

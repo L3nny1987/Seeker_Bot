@@ -1,6 +1,6 @@
 # HTTP-API und Datenformate
 
-Stand: Firmware 0.3.3. Basisadresse: `http://ROBOTER_IP`. Die Implementierung in `src/web_server.c` ist bei Abweichungen maßgeblich.
+Stand: Firmware 0.4.0. Basisadresse: `http://ROBOTER_IP`. Die Implementierung in `src/web_server.c` ist bei Abweichungen maßgeblich.
 
 ## Endpunkte
 
@@ -13,6 +13,8 @@ Stand: Firmware 0.3.3. Basisadresse: `http://ROBOTER_IP`. Die Implementierung in
 | GET | `/api/map` | Binäre Karte, Version 1 |
 | GET | `/api/map?rle=1` | Version 2 mit RLE, falls kleiner; sonst Version 1 |
 | POST | `/api/control` | Steuerung, Zustände und Parameter |
+| GET | `/api/route` | Konfigurierte Route, Fortschritt und Kantenbewertung |
+| POST | `/api/route` | Binäres Routenpaket prüfen und Route starten |
 | GET | `/api/diag` | Diagnose, Neustarthistorie und Log |
 | POST | `/api/diag?cmd=clear` | Diagnosezähler und Historie löschen |
 | GET | `/api/record` | Recorder-Status |
@@ -32,7 +34,7 @@ Origin: http://ROBOTER_IP
 X-Seeker-Control: 1
 ```
 
-Für `/api/control` zusätzlich exakt `Content-Type: application/json`. Der Body ist auf 768 Byte begrenzt. Dieser Origin-Schutz und der Controller-Lease sind keine Authentifizierung gegenüber anderen LAN-Clients. Siehe [Sicherheitsmodell](../SECURITY.md).
+Für `/api/control` zusätzlich exakt `Content-Type: application/json`, für `/api/route` und `/api/ota` `application/octet-stream`. Der Body ist auf 768 Byte begrenzt. Dieser Origin-Schutz und der Controller-Lease sind keine Authentifizierung gegenüber anderen LAN-Clients. Siehe [Sicherheitsmodell](../SECURITY.md).
 
 ## Controller-Lease und Befehle
 
@@ -80,7 +82,7 @@ Die gültigen Bereiche und Beziehungen stehen in `src/motion_settings.h`. Beispi
 
 ## Status und Scan
 
-Der Status enthält unter anderem `version`, `mode`, `reason`, `controller`, `linkOk`, `lidarHealthy`, `coverage`, `scanAgeMs`, `scanSequence`, Motorwerte und Navigationsdetails. Für die Lokalisierung sind `poseValid`, `poseX`, `poseY`, `poseDeg`, `poseAgeMs`, `slamQuality`, `slamLost`, `slamWeak` und `slamDegenerate` relevant. Speicherdiagnose umfasst `heap`, `minHeap`, `heapInternal`, `heapLargest` und `allocFailures`.
+Der Status enthält unter anderem `version`, `mode`, `reason`, `controller`, `linkOk`, `lidarHealthy`, `coverage`, `scanAgeMs`, `scanSequence`, Motorwerte und Navigationsdetails. Für die Lokalisierung sind `poseValid`, `poseX`, `poseY`, `poseDeg`, `poseAgeMs`, `slamQuality`, `slamLost`, `slamWeak` und `slamDegenerate` relevant. Speicherdiagnose umfasst `heap`, `minHeap`, `heapInternal`, `heapLargest` und `allocFailures`. Routen melden `mapGeneration`, `routeRevision`, `routeActive`, `routeConfigured`, `routeApproaching`, `routeAdaptive`, `routeLaps`, `routeCompleted`, `routeLearnedLaps`, `routePoints`, `routeTarget`, `routeConfidence` und `routePower`; während einer Route ist `strategy` gleich `route`.
 
 `GET /api/scan` liefert `fresh`, `rpm`, `sequence`, `ageMs` und `distance` mit 360 Werten. Entfernungen sind Millimeter; 0 bedeutet kein gültiger Messwert. Index 0 zeigt nach vorne, 90 nach rechts, 180 nach hinten, 270 nach links. `frontMm` und ähnliche Rohabstände im Status sind ab LiDAR gemessen; `navCenterMm` und `clearRearMm` sind freie Fahrstrecken der Körperkante.
 
@@ -111,6 +113,33 @@ Danach folgt das Raster und unmittelbar danach die Fahrspur. Rasterindex ist `gy
 **Version 2:** RLE über denselben gepackten Bytes. Jedes Paar ist `(Anzahl, Wert)`, mit Anzahl 1–255. Die Dekodierung muss genau die erwartete v1-Rasterlänge ergeben. Null-Läufe, unvollständige Paare, Überläufe oder widersprüchliche Längen sind ungültig. Der Server liefert v2 nur nach Opt-in und wenn die Kodierung kleiner ist und in den vorhandenen Puffer passt.
 
 **Fahrspur:** Je Punkt zwei `int16`, x und y in Zentimetern. Ihr Startoffset ist `40 + Rasterdatenlänge`; bei v2 ist keine zusätzliche Ausrichtung auf vier Byte vorgesehen. Decoder sollten deshalb unaligned-sichere Zugriffe verwenden. Die Karte kann sich während der Übertragung ändern und ist kein atomarer Snapshot.
+
+## Patrouillenrouten
+
+Eine Route ist ein geschlossener Polygonzug in Millimetern im Koordinatensystem der aktuellen Karte. Die Verbindung vom letzten zum ersten Punkt ist implizit. `POST /api/route` erwartet `Content-Type: application/octet-stream` und die Schreib-Header. Lease-Token und Sequenznummer stehen im Paket selbst, damit kein JSON-Baum für bis zu 64 Punkte aufgebaut werden muss.
+
+| Offset | Typ | Bedeutung |
+|---:|---|---|
+| 0 | 4 Bytes | ASCII `SRTE` |
+| 4 | `uint8` | Version, aktuell 1 |
+| 5 | `uint8` | 1 = adaptives Tempo, 0 = feste Autoleistung |
+| 6 | `uint16` | Punktanzahl 3–64 |
+| 8 | `uint32` | Controller-Token |
+| 12 | `uint32` | Sequenznummer, höher als die zuletzt angenommene |
+| 16 | `uint32` | Kartengeneration (`mapGeneration` aus dem Status) |
+| 20 | `uint32` | Runden; 0 = bis zum Stopp |
+| 24 | 8 Bytes | Reserviert, 0 |
+| 32 | je 2 × `int16` | Punkte x / y in mm |
+
+Die Paketlänge muss genau `32 + 4 * Punktanzahl` betragen. Geometrisch gültig ist eine Route, wenn alle Punkte innerhalb von ±6200 mm liegen, jede Kante 250–2000 mm lang ist, der Umfang mindestens 1 m beträgt und die Fläche nicht verschwindend klein ist.
+
+Vor dem Start prüft die Firmware zusätzlich: Roboter im IDLE ohne Bewegung, gültiges Token, passende Kartengeneration, Inbetriebnahme, gesunder LiDAR, eine gültige, nicht als schwach markierte und frische Kartenpose sowie eine Autoleistung oberhalb der Mindestleistung. Entlang jeder Kante muss ein Korridor für die Körperkontur plus Reserve aus bekannt freien Kartenzellen bestehen; unbekannte Zellen zählen nicht als frei.
+
+Fehlerantworten haben die Form `{"ok":false,"error":"..."}`. Ungültige Pakete und Geometrie liefern HTTP 400 (`route_invalid_packet`, `route_invalid_points`, `route_outside_map`, `route_point_spacing`, `route_too_small`), unpassende Zustände HTTP 409 (`route_busy`, `route_wrong_map`, `route_not_ready`, `route_power_range`, `route_unknown_or_blocked`, `route_controller_or_state`, `ota_busy`).
+
+Während der Fahrt bricht die Route bei Kartenreset (`route_map_changed`), mehr als 400 mm Abstand zur aktuellen Kante (`route_deviation`) oder 45 s ohne Annäherung (`route_no_progress`) ab. Unsichere Lokalisierung pausiert sie. Jeder Stopp des Robot Managers beendet sie, etwa `stop` oder `estop` über `/api/control` oder ein Verbindungsverlust; eine beendete Route startet nicht selbstständig neu.
+
+`GET /api/route` liefert `configured`, `active`, `generation`, `laps`, `completed`, `learnedLaps`, `adaptive`, `target`, `approaching`, `points` als `[[x,y],…]` und `scores` mit einer Bewertung 0–100 je ankommender Kante. Die Bewertung ist eine Heuristik aus sauber befahrenen Runden, keine Wahrscheinlichkeit.
 
 ## OTA und Recorder
 

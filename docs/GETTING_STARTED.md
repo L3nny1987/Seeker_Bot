@@ -1,6 +1,6 @@
 # Seeker Bot einrichten
 
-**Autor:** Lennard Schimmer · **Stand:** Firmware 0.3.3
+**Autor:** Lennard Schimmer · **Stand:** Firmware 0.4.0
 
 ## 1. Voraussetzungen
 
@@ -62,11 +62,23 @@ pio device monitor --port PORT --baud 115200
 
 Nach einem gemeldeten WLAN-Verbindungsabbruch startet die Fahrt nicht automatisch wieder. Steuerung erneut übernehmen und den gewünschten Modus bewusst starten.
 
-## 6. Parameter ändern
+## 6. Patrouillenroute abfahren
+
+Routen beziehen sich immer auf die aktuelle Karte. Zuerst die Umgebung so weit kartieren, dass die gewünschte Strecke als frei bekannt ist, und den Roboter dann im IDLE stehen lassen.
+
+1. Im Tab „Karte“ unter „Routen · geschlossener Rundkurs“ auf „Neue Route zeichnen“ klicken und die Eckpunkte nacheinander in die Karte setzen. Benachbarte Punkte müssen 25 cm bis 2 m auseinanderliegen.
+2. „Kreis schließen“ verbindet den letzten mit dem ersten Punkt. „Letzten Punkt entfernen“ und „Verwerfen“ korrigieren den Entwurf.
+3. Anzahl vollständiger Runden eintragen oder „∞ Bis zum Stopp wiederholen“ wählen. „Tempo mit Streckenerfahrung steigern“ lässt gerade, mehrfach sauber befahrene Kanten schneller werden; Kurven bleiben langsam.
+4. Optional mit Namen über „Route merken“ im Browser speichern. Gemerkte Routen gelten nur für die Karte, auf der sie gezeichnet wurden.
+5. „Route starten“. Der Roboter fährt zuerst den ersten Punkt an und folgt dann dem Rundkurs.
+
+Die Firmware lehnt den Start ab, wenn ein Kantenkorridor unbekannte oder belegte Zellen enthält, die Lokalisierung unsicher ist oder die Karte inzwischen zurückgesetzt wurde. Der Grund erscheint im Dashboard; die Bedeutung der Fehlercodes steht in [API.md](API.md#patrouillenrouten). „Route stoppen“ oder jeder andere Stopp beendet die Fahrt; sie wird nicht selbstständig fortgesetzt.
+
+## 7. Parameter ändern
 
 Im Stillstand einstellen. Fahrkorridor, Abstände, Rampen, Mindestleistung und Anfahrimpulse müssen zum Chassis passen. Die Standard-Mindestleistungen wurden am vorhandenen Roboter ermittelt und dürfen nicht als universelle Werte übernommen werden. Validierte Einstellungen liegen im NVS; eine neue Firmware allein setzt sie nicht zwingend zurück.
 
-## 7. OTA-Update
+## 8. OTA-Update
 
 Nur ein passendes Anwendungsimage verwenden und den Roboter im Stillstand lassen. Die neue Firmware startet den ESP32 neu.
 
@@ -78,7 +90,7 @@ Alternativ die Updatefunktion im Dashboard verwenden. Der Upload erfolgt in 4096
 
 **Gemeinsamer Flashbereich:** OTA überschreibt eine gegebenenfalls vorhandene SLAM-Aufzeichnung im inaktiven Slot. Wichtige Aufzeichnungen zuerst herunterladen.
 
-## 8. Eine problematische Fahrt aufzeichnen
+## 9. Eine problematische Fahrt aufzeichnen
 
 Die vorhandene Aufzeichnung zuerst sichern. Ein neuer Recorder-Start löscht den inaktiven OTA-Slot und damit auch eine dort vorhandene vorherige Firmware.
 

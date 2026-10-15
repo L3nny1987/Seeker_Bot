@@ -14,6 +14,7 @@
 | Mapper | `src/mapper.c` | SLAM-Aufgabe, IMU-Zeitzuordnung, Ziele und Recorder |
 | Navigation | `src/navigation.c` | Reines C: Korridore, Strategien und Manöver |
 | Pose-Feedback | `src/pose_feedback.h` | Frische Weltorientierung aus Kartenpose und Gyroskopreferenz |
+| Routen | `src/route_runner.c` | Reines C: Routenprüfung, Wegpunktfolge, Rundenzählung und adaptives Tempo ohne Heap |
 | Robot Manager | `src/robot_manager.c` | Einzige Anwendungsinstanz für Motorbefehle, Zustände und Freigaben |
 | Motortreiber | `components/track_drive/` | H-Brücken, PWM und verriegelter Stopp |
 | Netzwerk | `src/network.c` | WLAN-Ereignisse und Wiederverbindung |
